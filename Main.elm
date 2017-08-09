@@ -5,6 +5,9 @@ import Html.Attributes exposing (..)
 import Html.Events exposing (on)
 import Mouse exposing (Position)
 import Json.Decode as Decode
+import Random
+import Array exposing (Array)
+import Debug
 
 
 main : Program Never Model Msg
@@ -74,6 +77,12 @@ init =
 
         tiles =
             List.concatMap (\row -> List.map (\column -> Tile row column) columns) rows
+
+        length =
+            List.length tiles
+
+        randomInt =
+            Random.int 0 length
     in
         ( { staticItems =
                 List.map
@@ -88,7 +97,7 @@ init =
           , activeItem =
                 Nothing
           }
-        , Cmd.none
+        , Random.generate Shuffle (Random.list length (Random.pair randomInt randomInt))
         )
 
 
@@ -105,6 +114,7 @@ type Msg
     = DragStart Int Position
     | DragAt Position
     | DragEnd Position
+    | Shuffle (List ( Int, Int ))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -114,6 +124,13 @@ update msg model =
             ( model, Cmd.none )
     in
         case msg of
+            Shuffle swaps ->
+                let
+                    _ =
+                        Debug.log "swaps" swaps
+                in
+                    pure (updateShuffle swaps model)
+
             DragStart i xy ->
                 pure (updateDragStart model xy i)
 
@@ -136,6 +153,33 @@ update msg model =
 
                     Nothing ->
                         pure model
+
+
+updateShuffle : List ( Int, Int ) -> Model -> Model
+updateShuffle swaps model =
+    let
+        staticItems =
+            Array.fromList model.staticItems
+    in
+        { model
+            | staticItems =
+                List.foldl
+                    (\( i, j ) items -> swap i j items)
+                    staticItems
+                    swaps
+                    |> Array.toList
+        }
+
+
+swap : Int -> Int -> Array ( Item, Tile ) -> Array ( Item, Tile )
+swap i j arr =
+    Maybe.map2
+        (\( item1, tile1 ) ( item2, tile2 ) ->
+            Array.set j ( item1, tile2 ) (Array.set i ( item2, tile1 ) arr)
+        )
+        (Array.get i arr)
+        (Array.get j arr)
+        |> Maybe.withDefault arr
 
 
 updateDragEnd : ( Item, Tile ) -> Drag -> Model -> Model
