@@ -249,9 +249,9 @@ viewItem isDragging ( item, { x, y } ) attrs =
                     ++ px (viewConfig.rows * viewConfig.tileSize)
                )
              , ( "background-position"
-               , px (item.imageTile.column * viewConfig.tileSize)
+               , px (-item.imageTile.column * viewConfig.tileSize)
                     ++ " "
-                    ++ px (item.imageTile.row * viewConfig.tileSize)
+                    ++ px (-item.imageTile.row * viewConfig.tileSize)
                )
              , ( "position", "absolute" )
              , ( "left", px x )
@@ -266,7 +266,7 @@ viewItem isDragging ( item, { x, y } ) attrs =
          ]
             ++ attrs
         )
-        []
+        [ text (toString item.imageTile.column ++ "," ++ toString item.imageTile.row) ]
 
 
 viewDragableItem : Bool -> ( Item, Position ) -> Html Msg
@@ -320,19 +320,43 @@ viewDropZone tile =
         background []
 
 
+isDone : List ( Item, Tile ) -> Bool
+isDone items =
+    List.all (\( { imageTile }, tile ) -> imageTile == tile) items
+
+
 view : Model -> Html Msg
 view { activeItem, staticItems } =
-    div []
-        [ div []
-            (List.concat
-                [ viewActiveItem activeItem
-                , List.map
-                    (\( item, tile ) ->
-                        viewDragableItem False ( item, (tileToPosition tile) )
-                    )
-                    staticItems
-                ]
-            )
+    let
+        width =
+            viewConfig.tileSize * viewConfig.columns
 
-        -- , img [ src "/images/01.jpg" ] []
-        ]
+        height =
+            viewConfig.tileSize * viewConfig.rows
+
+        status =
+            if isDone staticItems then
+                "Done"
+            else
+                "In Progress"
+    in
+        div []
+            [ div []
+                [ text ("Status: " ++ status) ]
+            , div
+                [ style
+                    [ ( "position", "relative" )
+                    , ( "width", px width )
+                    , ( "height", px height )
+                    ]
+                ]
+                (List.concat
+                    [ viewActiveItem activeItem
+                    , List.map
+                        (\( item, tile ) ->
+                            viewDragableItem False ( item, (tileToPosition tile) )
+                        )
+                        staticItems
+                    ]
+                )
+            ]
