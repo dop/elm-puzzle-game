@@ -7,6 +7,7 @@ import Mouse exposing (Position)
 import Json.Decode as Decode
 import Random
 import Array exposing (Array)
+import Time exposing (Time)
 import Debug
 
 
@@ -35,6 +36,8 @@ type alias Drag =
 type alias Model =
     { activeItem : Maybe ( Item, Tile, Drag )
     , staticItems : List ( Item, Tile )
+    , playing : Bool
+    , timeout : Int
     }
 
 
@@ -77,12 +80,6 @@ init =
 
         tiles =
             List.concatMap (\row -> List.map (\column -> Tile row column) columns) rows
-
-        length =
-            List.length tiles
-
-        randomInt =
-            Random.int 0 length
     in
         ( { staticItems =
                 List.map
@@ -96,8 +93,10 @@ init =
                     tiles
           , activeItem =
                 Nothing
+          , playing = False
+          , timeout = 3
           }
-        , Random.generate Shuffle (Random.list length (Random.pair randomInt randomInt))
+        , Cmd.none
         )
 
 
@@ -115,6 +114,7 @@ type Msg
     | DragAt Position
     | DragEnd Position
     | Shuffle (List ( Int, Int ))
+    | Tick Time
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -124,12 +124,24 @@ update msg model =
             ( model, Cmd.none )
     in
         case msg of
-            Shuffle swaps ->
+            Tick _ ->
                 let
-                    _ =
-                        Debug.log "swaps" swaps
+                    length =
+                        List.length model.staticItems
+
+                    randomInt =
+                        Random.int 0 (length - 1)
                 in
-                    pure (updateShuffle swaps model)
+                    if model.timeout > 0 then
+                        pure { model | timeout = model.timeout - 1 }
+                    else
+                        ( { model | playing = True }
+                        , Random.generate Shuffle
+                            (Random.list (length // 3 * 2) (Random.pair randomInt randomInt))
+                        )
+
+            Shuffle swaps ->
+                pure (updateShuffle swaps model)
 
             DragStart i xy ->
                 pure (updateDragStart model xy i)
@@ -226,12 +238,22 @@ updateDragStart model click i =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    case model.activeItem of
-        Nothing ->
-            Sub.none
+    let
+        mouse =
+            case model.activeItem of
+                Nothing ->
+                    []
 
-        Just _ ->
-            Sub.batch [ Mouse.moves DragAt, Mouse.ups DragEnd ]
+                Just _ ->
+                    [ Mouse.moves DragAt, Mouse.ups DragEnd ]
+
+        time =
+            if not model.playing then
+                [ Time.every Time.second Tick ]
+            else
+                []
+    in
+        Sub.batch (mouse ++ time)
 
 
 type alias Rectangle =
@@ -310,7 +332,7 @@ viewItem isDragging ( item, { x, y } ) attrs =
          ]
             ++ attrs
         )
-        [ text (toString item.imageTile.column ++ "," ++ toString item.imageTile.row) ]
+        []
 
 
 viewDragableItem : Bool -> ( Item, Position ) -> Html Msg
@@ -370,7 +392,7 @@ isDone items =
 
 
 view : Model -> Html Msg
-view { activeItem, staticItems } =
+view { activeItem, staticItems, playing, timeout } =
     let
         width =
             viewConfig.tileSize * viewConfig.columns
@@ -383,10 +405,15 @@ view { activeItem, staticItems } =
                 "Done"
             else
                 "In Progress"
+
+        header =
+            if playing then
+                div [] [ text ("Status: " ++ status) ]
+            else
+                div [] [ text ("Staring in " ++ toString timeout ++ "...") ]
     in
         div []
-            [ div []
-                [ text ("Status: " ++ status) ]
+            [ header
             , div
                 [ style
                     [ ( "position", "relative" )
