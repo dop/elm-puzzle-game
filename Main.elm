@@ -19,6 +19,7 @@ main =
 
 type alias Item =
     { id : Int
+    , imageTile : Tile
     }
 
 
@@ -29,7 +30,7 @@ type alias Drag =
 
 
 type alias Model =
-    { activeItem : Maybe ( Item, Drag )
+    { activeItem : Maybe ( Item, Tile, Drag )
     , staticItems : List ( Item, Tile )
     }
 
@@ -42,6 +43,8 @@ type alias Tile =
 
 type alias Config =
     { tileSize : Int
+    , rows : Int
+    , columns : Int
     , imageSrc : String
     }
 
@@ -62,34 +65,39 @@ positionToTile { x, y } =
 
 init : ( Model, Cmd Msg )
 init =
-    ( { staticItems =
-            [ ( { id = 0 }, Tile 0 0 )
-            , ( { id = 1 }, Tile 1 0 )
-            , ( { id = 2 }, Tile 0 1 )
-            , ( { id = 3 }, Tile 1 1 )
-            , ( { id = 4 }, Tile 1 2 )
-            , ( { id = 5 }, Tile 2 1 )
-            , ( { id = 6 }, Tile 2 2 )
-            , ( { id = 7 }, Tile 1 3 )
-            , ( { id = 8 }, Tile 0 3 )
-            , ( { id = 9 }, Tile 2 3 )
-            , ( { id = 10 }, Tile 2 0 )
-            , ( { id = 11 }, Tile 0 2 )
-            , ( { id = 12 }, Tile 3 0 )
-            , ( { id = 13 }, Tile 3 1 )
-            , ( { id = 14 }, Tile 3 2 )
-            , ( { id = 15 }, Tile 3 3 )
-            ]
-      , activeItem = Nothing
-      }
-    , Cmd.none
-    )
+    let
+        rows =
+            List.range 0 (viewConfig.rows - 1)
+
+        columns =
+            List.range 0 (viewConfig.columns - 1)
+
+        tiles =
+            List.concatMap (\row -> List.map (\column -> Tile row column) columns) rows
+    in
+        ( { staticItems =
+                List.map
+                    (\tile ->
+                        ( { id = tile.row * viewConfig.columns + tile.column
+                          , imageTile = tile
+                          }
+                        , tile
+                        )
+                    )
+                    tiles
+          , activeItem =
+                Nothing
+          }
+        , Cmd.none
+        )
 
 
 viewConfig : Config
 viewConfig =
     { tileSize = 100
     , imageSrc = "/images/01.jpg"
+    , rows = 4
+    , columns = 4
     }
 
 
@@ -111,11 +119,11 @@ update msg model =
 
             DragAt xy ->
                 case model.activeItem of
-                    Just ( item, drag ) ->
+                    Just ( item, tile, drag ) ->
                         pure
                             { model
                                 | activeItem =
-                                    Just ( item, Drag drag.offset xy )
+                                    Just ( item, tile, Drag drag.offset xy )
                             }
 
                     Nothing ->
@@ -123,37 +131,30 @@ update msg model =
 
             DragEnd _ ->
                 case model.activeItem of
-                    Just ( item, drag ) ->
-                        pure (updateDragEnd item drag model)
+                    Just ( item, tile, drag ) ->
+                        pure (updateDragEnd ( item, tile ) drag model)
 
                     Nothing ->
                         pure model
 
 
-updateDragEnd : Item -> Drag -> Model -> Model
-updateDragEnd item drag model =
+updateDragEnd : ( Item, Tile ) -> Drag -> Model -> Model
+updateDragEnd ( activeItem, sourceTile ) drag model =
     let
+        targetTile =
+            positionToTile (getPosition drag)
+
         staticItems =
-            ( item, positionToTile (getPosition drag) ) :: model.staticItems
+            case List.partition (\( _, tile ) -> tile == targetTile) model.staticItems of
+                ( [ ( targetItem, targetTile ) ], staticItems ) ->
+                    ( activeItem, targetTile ) :: ( targetItem, sourceTile ) :: staticItems
 
-        snapItem id dropTile ( item, tile ) =
-            if item.id == id then
-                ( item, dropTile )
-            else
-                ( item, tile )
-
-        snapItems { item, tile } staticItems =
-            case item of
-                Nothing ->
-                    staticItems
-
-                Just { id } ->
-                    List.map (snapItem id tile) staticItems
+                _ ->
+                    ( activeItem, targetTile ) :: model.staticItems
     in
         { model
             | activeItem = Nothing
-            , staticItems =
-                List.foldl snapItems staticItems []
+            , staticItems = staticItems
         }
 
 
@@ -169,6 +170,7 @@ updateDragStart model click i =
                     | activeItem =
                         Just
                             ( activeItem
+                            , tile
                             , Drag { x = click.x - x, y = click.y - y } click
                             )
                     , staticItems = staticItems
@@ -241,11 +243,15 @@ viewItem isDragging ( item, { x, y } ) attrs =
             ([ ( "width", px viewConfig.tileSize )
              , ( "height", px viewConfig.tileSize )
              , ( "background", "url(" ++ viewConfig.imageSrc ++ ")" )
-             , ( "background-size", px (4 * viewConfig.tileSize) )
-             , ( "background-position"
-               , px (item.id // 4 * viewConfig.tileSize)
+             , ( "background-size"
+               , px (viewConfig.columns * viewConfig.tileSize)
                     ++ " "
-                    ++ px (item.id % 4 * viewConfig.tileSize)
+                    ++ px (viewConfig.rows * viewConfig.tileSize)
+               )
+             , ( "background-position"
+               , px (item.imageTile.column * viewConfig.tileSize)
+                    ++ " "
+                    ++ px (item.imageTile.row * viewConfig.tileSize)
                )
              , ( "position", "absolute" )
              , ( "left", px x )
@@ -260,7 +266,7 @@ viewItem isDragging ( item, { x, y } ) attrs =
          ]
             ++ attrs
         )
-        [ text (toString item.id) ]
+        []
 
 
 viewDragableItem : Bool -> ( Item, Position ) -> Html Msg
@@ -274,13 +280,13 @@ viewDragableItem isDragging itemAndPos =
             [ on "mousedown" (Decode.map (DragStart item.id) Mouse.position) ]
 
 
-viewActiveItem : Maybe ( Item, Drag ) -> List (Html Msg)
+viewActiveItem : Maybe ( Item, Tile, Drag ) -> List (Html Msg)
 viewActiveItem mActiveItem =
     case mActiveItem of
         Nothing ->
             []
 
-        Just ( item, drag ) ->
+        Just ( item, _, drag ) ->
             let
                 pos =
                     getPosition drag
