@@ -145,7 +145,7 @@ update msg model =
                     if model.timeout > 1 then
                         pure { model | timeout = model.timeout - 1 }
                     else
-                        ( { model | playing = True }
+                        ( { model | playing = True, timeout = 0 }
                         , Random.generate Shuffle
                             (Random.list (length // 3 * 2) (Random.pair randomInt randomInt))
                         )
@@ -406,23 +406,25 @@ view { activeItem, staticItems, playing, timeout } =
 
         status =
             if isDone staticItems then
-                "Done"
+                "Correct!"
             else
-                "In Progress"
+                "Not correct yet"
 
         header =
             if playing then
-                div [] [ text ("Status: " ++ status) ]
+                status
             else
-                div [] [ text ("Staring in " ++ toString timeout ++ "...") ]
+                "Staring in " ++ toString timeout ++ "..."
     in
         div []
-            [ header
+            [ div [ style [ ( "text-align", "center" ) ] ]
+                [ text header ]
             , div
                 [ style
                     [ ( "position", "relative" )
                     , ( "width", px width )
                     , ( "height", px height )
+                    , ( "margin", "0 auto" )
                     ]
                 ]
                 (List.concat
