@@ -21,6 +21,18 @@ main =
         }
 
 
+
+-- Types
+
+
+type Msg
+    = DragStart Int Position
+    | DragAt Position
+    | DragEnd Position
+    | Shuffle (List ( Int, Int ))
+    | Tick Time
+
+
 type alias Item =
     { id : Int
     , imageTile : Tile
@@ -52,6 +64,12 @@ type alias Config =
     , rows : Int
     , columns : Int
     , imageSrc : String
+    }
+
+
+type alias Rectangle =
+    { topLeft : Position
+    , bottomRight : Position
     }
 
 
@@ -107,14 +125,6 @@ viewConfig =
     , rows = 4
     , columns = 4
     }
-
-
-type Msg
-    = DragStart Int Position
-    | DragAt Position
-    | DragEnd Position
-    | Shuffle (List ( Int, Int ))
-    | Tick Time
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -254,12 +264,6 @@ subscriptions model =
                 []
     in
         Sub.batch (mouse ++ time)
-
-
-type alias Rectangle =
-    { topLeft : Position
-    , bottomRight : Position
-    }
 
 
 isInside : Position -> Rectangle -> Bool
