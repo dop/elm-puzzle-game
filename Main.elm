@@ -142,7 +142,7 @@ update msg model =
                     randomInt =
                         Random.int 0 (length - 1)
                 in
-                    if model.timeout > 0 then
+                    if model.timeout > 1 then
                         pure { model | timeout = model.timeout - 1 }
                     else
                         ( { model | playing = True }
