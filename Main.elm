@@ -346,6 +346,11 @@ viewItem isDragging ( item, { x, y } ) attrs =
         []
 
 
+viewNonDragableItem : ( Item, Position ) -> Html Msg
+viewNonDragableItem itemAndPos =
+    viewItem False itemAndPos []
+
+
 viewDragableItem : Bool -> ( Item, Position ) -> Html Msg
 viewDragableItem isDragging itemAndPos =
     let
@@ -438,7 +443,14 @@ view { activeItem, staticItems, playing, timeout } =
                     [ viewActiveItem activeItem
                     , List.map
                         (\( item, tile ) ->
-                            viewDragableItem False ( item, (tileToPosition tile) )
+                            let
+                                itemAndPos =
+                                    ( item, (tileToPosition tile) )
+                            in
+                                if playing then
+                                    viewDragableItem False itemAndPos
+                                else
+                                    viewNonDragableItem itemAndPos
                         )
                         staticItems
                     ]
