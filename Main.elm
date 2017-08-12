@@ -326,12 +326,19 @@ viewItem isDragging ( item, { x, y } ) attrs =
              , ( "position", "absolute" )
              , ( "left", px x )
              , ( "top", px y )
-             , ( "z-index", "1" )
+             , ( "z-index"
+               , if isDragging then
+                    "2"
+                 else
+                    "0"
+               )
+             , ( "box-shadow"
+               , if isDragging then
+                    "0 0 16px black"
+                 else
+                    "0 0 0 none"
+               )
              ]
-                ++ if isDragging then
-                    [ ( "box-shadow", "0 0 16px black" ), ( "z-index", "2" ) ]
-                   else
-                    []
             )
          ]
             ++ attrs
