@@ -384,11 +384,11 @@ viewDropZone tile =
                 [ style
                     [ ( "width", px viewConfig.tileSize )
                     , ( "height", px viewConfig.tileSize )
-                    , ( "border", "1px dotted gray" )
+                    , ( "outline", "3px solid red" )
                     , ( "left", px x )
                     , ( "top", px y )
                     , ( "position", "absolute" )
-                    , ( "z-index", "0" )
+                    , ( "z-index", "1" )
                     , ( "background", "transparent" )
                     ]
                 ]
