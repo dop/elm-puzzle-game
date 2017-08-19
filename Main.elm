@@ -1,14 +1,16 @@
 module Main exposing (..)
 
-import Html exposing (Html, button, div, text, input, img)
+import Html exposing (Html, button, div, text, input, img, select, option)
 import Html.Attributes exposing (..)
-import Html.Events exposing (on)
+import Html.Events exposing (on, onClick, targetValue)
 import Mouse exposing (Position)
 import Json.Decode as Decode
 import Random
+import Random.Array
+import List.Extra
 import Array exposing (Array)
 import Time exposing (Time)
-import Debug
+import Styles
 
 
 main : Program Never Model Msg
@@ -21,16 +23,14 @@ main =
         }
 
 
-
--- Types
-
-
 type Msg
     = DragStart Int Position
     | DragAt Position
     | DragEnd Position
-    | Shuffle (List ( Int, Int ))
+    | Shuffle (List Item) (List Tile)
     | Tick Time
+    | PlayAgain
+    | PickImage Int
 
 
 type alias Item =
@@ -48,9 +48,15 @@ type alias Drag =
 type alias Model =
     { activeItem : Maybe ( Item, Tile, Drag )
     , staticItems : List ( Item, Tile )
-    , playing : Bool
-    , timeout : Int
+    , playState : PlayState
+    , image : Image
     }
+
+
+type PlayState
+    = Playing Int
+    | Timeout Int
+    | Win Int
 
 
 type alias Tile =
@@ -63,7 +69,6 @@ type alias Config =
     { tileSize : Int
     , rows : Int
     , columns : Int
-    , imageSrc : String
     }
 
 
@@ -111,20 +116,75 @@ init =
                     tiles
           , activeItem =
                 Nothing
-          , playing = False
-          , timeout = 3
+          , playState =
+                Timeout 3
+          , image =
+                defaultImage
           }
-        , Cmd.none
+        , randomImageCmd
         )
+
+
+randomImageCmd : Cmd Msg
+randomImageCmd =
+    Random.generate PickImage (Random.int 0 (Array.length images - 1))
 
 
 viewConfig : Config
 viewConfig =
-    { tileSize = 100
-    , imageSrc = "/images/01.jpg"
-    , rows = 4
-    , columns = 4
+    let
+        size =
+            640
+
+        pieces =
+            4
+    in
+        { tileSize = size // pieces
+        , rows = pieces
+        , columns = pieces
+        }
+
+
+type alias Image =
+    { url : String
     }
+
+
+defaultImage : Image
+defaultImage =
+    { url = "/images/01.jpg" }
+
+
+images : Array Image
+images =
+    Array.fromList
+        [ defaultImage
+        , { url = "/images/02.jpg" }
+        , { url = "/images/03.jpg" }
+        , { url = "/images/04.jpg" }
+        , { url = "/images/05.jpg" }
+        , { url = "/images/06.jpg" }
+        , { url = "/images/07.jpg" }
+        , { url = "/images/08.jpg" }
+        , { url = "/images/09.jpg" }
+        , { url = "/images/10.jpg" }
+        , { url = "/images/11.jpg" }
+        ]
+
+
+shuffleCmd : List ( Item, Tile ) -> Cmd Msg
+shuffleCmd pairs =
+    let
+        items =
+            List.map Tuple.first pairs
+
+        tiles =
+            List.map Tuple.second pairs
+    in
+        Random.generate (Shuffle items)
+            ((Random.Array.shuffle <| Array.fromList tiles)
+                |> Random.map Array.toList
+            )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -134,24 +194,32 @@ update msg model =
             ( model, Cmd.none )
     in
         case msg of
+            PickImage n ->
+                case Array.get n images of
+                    Just image ->
+                        pure { model | image = image }
+
+                    Nothing ->
+                        pure { model | image = defaultImage }
+
             Tick _ ->
-                let
-                    length =
-                        List.length model.staticItems
+                case model.playState of
+                    Timeout timeout ->
+                        if timeout > 1 then
+                            pure { model | playState = Timeout (timeout - 1) }
+                        else
+                            ( { model | playState = Playing 0 }
+                            , shuffleCmd model.staticItems
+                            )
 
-                    randomInt =
-                        Random.int 0 (length - 1)
-                in
-                    if model.timeout > 1 then
-                        pure { model | timeout = model.timeout - 1 }
-                    else
-                        ( { model | playing = True, timeout = 0 }
-                        , Random.generate Shuffle
-                            (Random.list (length // 3 * 2) (Random.pair randomInt randomInt))
-                        )
+                    Playing n ->
+                        pure { model | playState = Playing (n + 1) }
 
-            Shuffle swaps ->
-                pure (updateShuffle swaps model)
+                    _ ->
+                        pure model
+
+            Shuffle items tiles ->
+                pure { model | staticItems = List.Extra.zip items tiles }
 
             DragStart i xy ->
                 pure (updateDragStart model xy i)
@@ -171,37 +239,62 @@ update msg model =
             DragEnd _ ->
                 case model.activeItem of
                     Just ( item, tile, drag ) ->
-                        pure (updateDragEnd ( item, tile ) drag model)
+                        let
+                            newModel =
+                                updateDragEnd ( item, tile ) drag model
+
+                            playState =
+                                if isDone newModel.staticItems then
+                                    toWin newModel.playState
+                                else
+                                    newModel.playState
+                        in
+                            pure { newModel | playState = playState }
 
                     Nothing ->
                         pure model
 
+            PlayAgain ->
+                ( { model | playState = Timeout 3 }
+                , randomImageCmd
+                )
 
-updateShuffle : List ( Int, Int ) -> Model -> Model
-updateShuffle swaps model =
+
+toWin : PlayState -> PlayState
+toWin state =
+    case state of
+        Playing n ->
+            Win n
+
+        _ ->
+            Win 0
+
+
+itemIsDone : ( Item, Tile ) -> Bool
+itemIsDone ( { imageTile }, tile ) =
+    imageTile == tile
+
+
+isDone : List ( Item, Tile ) -> Bool
+isDone items =
+    List.all itemIsDone items
+
+
+getProgress : List ( Item, Tile ) -> ( Int, Int )
+getProgress items =
     let
-        staticItems =
-            Array.fromList model.staticItems
+        total =
+            List.length items
+
+        done =
+            List.length (List.filter itemIsDone items)
     in
-        { model
-            | staticItems =
-                List.foldl
-                    (\( i, j ) items -> swap i j items)
-                    staticItems
-                    swaps
-                    |> Array.toList
-        }
+        ( done, total )
 
 
-swap : Int -> Int -> Array ( Item, Tile ) -> Array ( Item, Tile )
-swap i j arr =
-    Maybe.map2
-        (\( item1, tile1 ) ( item2, tile2 ) ->
-            Array.set j ( item1, tile2 ) (Array.set i ( item2, tile1 ) arr)
-        )
-        (Array.get i arr)
-        (Array.get j arr)
-        |> Maybe.withDefault arr
+tileInBounds : ( Int, Int ) -> Tile -> Bool
+tileInBounds ( rows, columns ) { row, column } =
+    row >= 0 && row < rows && column >= 0 && column < columns
 
 
 updateDragEnd : ( Item, Tile ) -> Drag -> Model -> Model
@@ -211,12 +304,15 @@ updateDragEnd ( activeItem, sourceTile ) drag model =
             positionToTile (getPosition drag)
 
         staticItems =
-            case List.partition (\( _, tile ) -> tile == targetTile) model.staticItems of
-                ( [ ( targetItem, targetTile ) ], staticItems ) ->
-                    ( activeItem, targetTile ) :: ( targetItem, sourceTile ) :: staticItems
+            if tileInBounds ( viewConfig.rows, viewConfig.columns ) targetTile then
+                case List.partition (\( _, tile ) -> tile == targetTile) model.staticItems of
+                    ( [ ( targetItem, targetTile ) ], staticItems ) ->
+                        ( activeItem, targetTile ) :: ( targetItem, sourceTile ) :: staticItems
 
-                _ ->
-                    ( activeItem, targetTile ) :: model.staticItems
+                    _ ->
+                        ( activeItem, targetTile ) :: model.staticItems
+            else
+                ( activeItem, sourceTile ) :: model.staticItems
     in
         { model
             | activeItem = Nothing
@@ -258,10 +354,15 @@ subscriptions model =
                     [ Mouse.moves DragAt, Mouse.ups DragEnd ]
 
         time =
-            if not model.playing then
-                [ Time.every Time.second Tick ]
-            else
-                []
+            case model.playState of
+                Timeout _ ->
+                    [ Time.every Time.second Tick ]
+
+                Playing _ ->
+                    [ Time.every Time.second Tick ]
+
+                _ ->
+                    []
     in
         Sub.batch (mouse ++ time)
 
@@ -306,13 +407,13 @@ px number =
     toString number ++ "px"
 
 
-viewItem : Bool -> ( Item, Position ) -> List (Html.Attribute Msg) -> Html Msg
-viewItem isDragging ( item, { x, y } ) attrs =
+viewItem : Image -> Bool -> ( Item, Position ) -> List (Html.Attribute Msg) -> Html Msg
+viewItem image isDragging ( item, { x, y } ) attrs =
     div
         ([ style
             ([ ( "width", px viewConfig.tileSize )
              , ( "height", px viewConfig.tileSize )
-             , ( "background", "url(" ++ viewConfig.imageSrc ++ ")" )
+             , ( "background-image", "url(" ++ image.url ++ ")" )
              , ( "background-size"
                , px (viewConfig.columns * viewConfig.tileSize)
                     ++ " "
@@ -336,7 +437,7 @@ viewItem isDragging ( item, { x, y } ) attrs =
                , if isDragging then
                     "0 0 16px black"
                  else
-                    "0 0 0 none"
+                    "none"
                )
              ]
             )
@@ -346,24 +447,25 @@ viewItem isDragging ( item, { x, y } ) attrs =
         []
 
 
-viewNonDragableItem : ( Item, Position ) -> Html Msg
-viewNonDragableItem itemAndPos =
-    viewItem False itemAndPos []
+viewNonDragableItem : Image -> ( Item, Position ) -> Html Msg
+viewNonDragableItem image itemAndPos =
+    viewItem image False itemAndPos []
 
 
-viewDragableItem : Bool -> ( Item, Position ) -> Html Msg
-viewDragableItem isDragging itemAndPos =
+viewDragableItem : Image -> Bool -> ( Item, Position ) -> Html Msg
+viewDragableItem image isDragging itemAndPos =
     let
         ( item, _ ) =
             itemAndPos
     in
-        viewItem isDragging
+        viewItem image
+            isDragging
             itemAndPos
             [ on "mousedown" (Decode.map (DragStart item.id) Mouse.position) ]
 
 
-viewActiveItem : Maybe ( Item, Tile, Drag ) -> List (Html Msg)
-viewActiveItem mActiveItem =
+viewActiveItem : Image -> Maybe ( Item, Tile, Drag ) -> List (Html Msg)
+viewActiveItem image mActiveItem =
     case mActiveItem of
         Nothing ->
             []
@@ -373,7 +475,7 @@ viewActiveItem mActiveItem =
                 pos =
                     getPosition drag
             in
-                [ viewDragableItem True ( item, pos )
+                [ viewDragableItem image True ( item, pos )
                 , viewDropZone (positionToTile pos)
                 ]
 
@@ -402,57 +504,118 @@ viewDropZone tile =
         background []
 
 
-isDone : List ( Item, Tile ) -> Bool
-isDone items =
-    List.all (\( { imageTile }, tile ) -> imageTile == tile) items
+formatSeconds : Int -> String
+formatSeconds n =
+    let
+        seconds =
+            n % 60
+
+        minutes =
+            n // 60
+
+        pad string =
+            if String.length string == 1 then
+                "0" ++ string
+            else
+                string
+    in
+        toString minutes ++ ":" ++ pad (toString seconds)
+
+
+getAllItems : Model -> List ( Item, Tile )
+getAllItems { staticItems, activeItem } =
+    case activeItem of
+        Just ( item, tile, drag ) ->
+            ( item, tile ) :: staticItems
+
+        Nothing ->
+            staticItems
 
 
 view : Model -> Html Msg
-view { activeItem, staticItems, playing, timeout } =
+view model =
     let
+        { activeItem, staticItems, playState, image } =
+            model
+
         width =
             viewConfig.tileSize * viewConfig.columns
 
         height =
             viewConfig.tileSize * viewConfig.rows
 
-        status =
-            if isDone staticItems then
-                "Correct!"
-            else
-                "Not correct yet"
+        barItem body =
+            div [ Styles.statusBarItem ] body
 
-        header =
-            if playing then
-                status
-            else
-                "Staring in " ++ toString timeout ++ "..."
-    in
-        div []
-            [ div [ style [ ( "text-align", "center" ) ] ]
-                [ text header ]
-            , div
-                [ style
-                    [ ( "position", "relative" )
-                    , ( "width", px width )
-                    , ( "height", px height )
-                    , ( "margin", "0 auto" )
-                    ]
-                ]
-                (List.concat
-                    [ viewActiveItem activeItem
-                    , List.map
-                        (\( item, tile ) ->
-                            let
-                                itemAndPos =
-                                    ( item, (tileToPosition tile) )
-                            in
-                                if playing then
-                                    viewDragableItem False itemAndPos
-                                else
-                                    viewNonDragableItem itemAndPos
+        ( progress, header, time ) =
+            case playState of
+                Playing n ->
+                    let
+                        ( done, total ) =
+                            getProgress (getAllItems model)
+                    in
+                        ( barItem [ text (toString done ++ " of " ++ toString total ++ " done.") ]
+                        , barItem []
+                        , barItem [ text (formatSeconds n) ]
                         )
-                        staticItems
+
+                Timeout n ->
+                    ( barItem []
+                    , barItem [ text ("Starting in " ++ toString n ++ "...") ]
+                    , barItem []
+                    )
+
+                Win n ->
+                    ( barItem []
+                    , barItem [ text ("Done! You took " ++ formatSeconds n) ]
+                    , barItem []
+                    )
+
+        pickImage value =
+            PickImage (Result.withDefault 0 (String.toInt value))
+
+        container body =
+            div [ Styles.container ] [ body ]
+
+        wrapper body =
+            div [ Styles.wrapper (toFloat width) ] body
+    in
+        container <|
+            wrapper <|
+                [ div [ Styles.statusBar ]
+                    [ progress
+                    , header
+                    , time
                     ]
-                )
-            ]
+                , div
+                    [ Styles.puzzleWrapper ( toFloat width, toFloat height )
+                    ]
+                    (List.concat
+                        [ viewActiveItem image activeItem
+                        , List.map
+                            (\( item, tile ) ->
+                                let
+                                    itemAndPos =
+                                        ( item, (tileToPosition tile) )
+                                in
+                                    case playState of
+                                        Playing _ ->
+                                            viewDragableItem image False itemAndPos
+
+                                        _ ->
+                                            viewNonDragableItem image itemAndPos
+                            )
+                            staticItems
+                        ]
+                    )
+                , case playState of
+                    Win _ ->
+                        button
+                            [ Styles.playAgainButton
+                            , onClick PlayAgain
+                            ]
+                            [ text "Play Again" ]
+
+                    _ ->
+                        text ""
+                ]
