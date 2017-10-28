@@ -1,4 +1,4 @@
-module Main exposing (..)
+module Puzzle exposing (..)
 
 import Html exposing (Html, button, div, text, input, img, select, option)
 import Html.Attributes exposing (..)
@@ -11,16 +11,8 @@ import List.Extra
 import Array exposing (Array)
 import Time exposing (Time)
 import Styles
-
-
-main : Program Never Model Msg
-main =
-    Html.program
-        { init = init
-        , view = view
-        , update = update
-        , subscriptions = subscriptions
-        }
+import Html.CssHelpers exposing (withNamespace)
+import Elements exposing (..)
 
 
 type Msg
@@ -30,6 +22,7 @@ type Msg
     | Shuffle (List Item) (List Tile)
     | Tick Time
     | PlayAgain
+    | PlayRandom
     | PickImage Int
 
 
@@ -46,7 +39,9 @@ type alias Drag =
 
 
 type alias Model =
-    { activeItem : Maybe ( Item, Tile, Drag )
+    { size : Int
+    , timeLimit : Int
+    , activeItem : Maybe ( Item, Tile, Drag )
     , staticItems : List ( Item, Tile )
     , playState : PlayState
     , image : Image
@@ -57,6 +52,7 @@ type PlayState
     = Playing Int
     | Timeout Int
     | Win Int
+    | Lose
 
 
 type alias Tile =
@@ -78,28 +74,31 @@ type alias Rectangle =
     }
 
 
-tileToPosition : Tile -> Position
-tileToPosition { row, column } =
+tileToPosition : Int -> Tile -> Position
+tileToPosition tileSize { row, column } =
     Position
-        (column * viewConfig.tileSize)
-        (row * viewConfig.tileSize)
+        (column * tileSize)
+        (row * tileSize)
 
 
-positionToTile : Position -> Tile
-positionToTile { x, y } =
+positionToTile : Int -> Position -> Tile
+positionToTile tileSize { x, y } =
     Tile
-        (round (toFloat y / toFloat viewConfig.tileSize))
-        (round (toFloat x / toFloat viewConfig.tileSize))
+        (round (toFloat y / toFloat tileSize))
+        (round (toFloat x / toFloat tileSize))
 
 
-init : ( Model, Cmd Msg )
-init =
+init : Int -> Int -> ( Model, Cmd Msg )
+init size timeLimit =
     let
+        config =
+            viewConfig size
+
         rows =
-            List.range 0 (viewConfig.rows - 1)
+            List.range 0 (config.rows - 1)
 
         columns =
-            List.range 0 (viewConfig.columns - 1)
+            List.range 0 (config.columns - 1)
 
         tiles =
             List.concatMap (\row -> List.map (\column -> Tile row column) columns) rows
@@ -107,7 +106,7 @@ init =
         ( { staticItems =
                 List.map
                     (\tile ->
-                        ( { id = tile.row * viewConfig.columns + tile.column
+                        ( { id = tile.row * config.columns + tile.column
                           , imageTile = tile
                           }
                         , tile
@@ -120,6 +119,8 @@ init =
                 Timeout 3
           , image =
                 defaultImage
+          , size = size
+          , timeLimit = timeLimit
           }
         , randomImageCmd
         )
@@ -130,19 +131,12 @@ randomImageCmd =
     Random.generate PickImage (Random.int 0 (Array.length images - 1))
 
 
-viewConfig : Config
-viewConfig =
-    let
-        size =
-            640
-
-        pieces =
-            4
-    in
-        { tileSize = size // pieces
-        , rows = pieces
-        , columns = pieces
-        }
+viewConfig : Int -> Config
+viewConfig pieces =
+    { tileSize = 640 // pieces
+    , rows = pieces
+    , columns = pieces
+    }
 
 
 type alias Image =
@@ -169,6 +163,7 @@ images =
         , { url = "/images/09.jpg" }
         , { url = "/images/10.jpg" }
         , { url = "/images/11.jpg" }
+        , { url = "/images/12.jpg" }
         ]
 
 
@@ -208,12 +203,15 @@ update msg model =
                         if timeout > 1 then
                             pure { model | playState = Timeout (timeout - 1) }
                         else
-                            ( { model | playState = Playing 0 }
+                            ( { model | playState = Playing model.timeLimit }
                             , shuffleCmd model.staticItems
                             )
 
                     Playing n ->
-                        pure { model | playState = Playing (n + 1) }
+                        if n > 1 then
+                            pure { model | playState = Playing (n - 1) }
+                        else
+                            pure { model | playState = Lose }
 
                     _ ->
                         pure model
@@ -255,9 +253,22 @@ update msg model =
                         pure model
 
             PlayAgain ->
-                ( { model | playState = Timeout 3 }
+                ( playAgain model
+                , Cmd.none
+                )
+
+            PlayRandom ->
+                ( playAgain model
                 , randomImageCmd
                 )
+
+
+playAgain : Model -> Model
+playAgain model =
+    { model
+        | playState = Timeout 3
+        , staticItems = List.map (\( item, tile ) -> ( item, item.imageTile )) model.staticItems
+    }
 
 
 toWin : PlayState -> PlayState
@@ -300,11 +311,14 @@ tileInBounds ( rows, columns ) { row, column } =
 updateDragEnd : ( Item, Tile ) -> Drag -> Model -> Model
 updateDragEnd ( activeItem, sourceTile ) drag model =
     let
+        config =
+            viewConfig model.size
+
         targetTile =
-            positionToTile (getPosition drag)
+            positionToTile config.tileSize (getPosition drag)
 
         staticItems =
-            if tileInBounds ( viewConfig.rows, viewConfig.columns ) targetTile then
+            if tileInBounds ( config.rows, config.columns ) targetTile then
                 case List.partition (\( _, tile ) -> tile == targetTile) model.staticItems of
                     ( [ ( targetItem, targetTile ) ], staticItems ) ->
                         ( activeItem, targetTile ) :: ( targetItem, sourceTile ) :: staticItems
@@ -325,8 +339,11 @@ updateDragStart model click i =
     case List.partition (\( item, _ ) -> item.id == i) model.staticItems of
         ( [ ( activeItem, tile ) ], staticItems ) ->
             let
+                config =
+                    viewConfig model.size
+
                 { x, y } =
-                    tileToPosition tile
+                    tileToPosition config.tileSize tile
             in
                 { model
                     | activeItem =
@@ -407,22 +424,26 @@ px number =
     toString number ++ "px"
 
 
-viewItem : Image -> Bool -> ( Item, Position ) -> List (Html.Attribute Msg) -> Html Msg
-viewItem image isDragging ( item, { x, y } ) attrs =
+{ id, class, classList } =
+    withNamespace ""
+
+
+viewItem : Config -> Image -> Bool -> ( Item, Position ) -> List (Html.Attribute Msg) -> Html Msg
+viewItem config image isDragging ( item, { x, y } ) attrs =
     div
         ([ style
-            ([ ( "width", px viewConfig.tileSize )
-             , ( "height", px viewConfig.tileSize )
+            ([ ( "width", px config.tileSize )
+             , ( "height", px config.tileSize )
              , ( "background-image", "url(" ++ image.url ++ ")" )
              , ( "background-size"
-               , px (viewConfig.columns * viewConfig.tileSize)
+               , px (config.columns * config.tileSize)
                     ++ " "
-                    ++ px (viewConfig.rows * viewConfig.tileSize)
+                    ++ px (config.rows * config.tileSize)
                )
              , ( "background-position"
-               , px (-item.imageTile.column * viewConfig.tileSize)
+               , px (-item.imageTile.column * config.tileSize)
                     ++ " "
-                    ++ px (-item.imageTile.row * viewConfig.tileSize)
+                    ++ px (-item.imageTile.row * config.tileSize)
                )
              , ( "position", "absolute" )
              , ( "left", px x )
@@ -447,25 +468,26 @@ viewItem image isDragging ( item, { x, y } ) attrs =
         []
 
 
-viewNonDragableItem : Image -> ( Item, Position ) -> Html Msg
-viewNonDragableItem image itemAndPos =
-    viewItem image False itemAndPos []
+viewNonDragableItem : Config -> Image -> ( Item, Position ) -> Html Msg
+viewNonDragableItem config image itemAndPos =
+    viewItem config image False itemAndPos []
 
 
-viewDragableItem : Image -> Bool -> ( Item, Position ) -> Html Msg
-viewDragableItem image isDragging itemAndPos =
+viewDragableItem : Config -> Image -> Bool -> ( Item, Position ) -> Html Msg
+viewDragableItem config image isDragging itemAndPos =
     let
         ( item, _ ) =
             itemAndPos
     in
-        viewItem image
+        viewItem config
+            image
             isDragging
             itemAndPos
             [ on "mousedown" (Decode.map (DragStart item.id) Mouse.position) ]
 
 
-viewActiveItem : Image -> Maybe ( Item, Tile, Drag ) -> List (Html Msg)
-viewActiveItem image mActiveItem =
+viewActiveItem : Config -> Image -> Maybe ( Item, Tile, Drag ) -> List (Html Msg)
+viewActiveItem config image mActiveItem =
     case mActiveItem of
         Nothing ->
             []
@@ -475,22 +497,22 @@ viewActiveItem image mActiveItem =
                 pos =
                     getPosition drag
             in
-                [ viewDragableItem image True ( item, pos )
-                , viewDropZone (positionToTile pos)
+                [ viewDragableItem config image True ( item, pos )
+                , viewDropZone config (positionToTile config.tileSize pos)
                 ]
 
 
-viewDropZone : Tile -> Html Msg
-viewDropZone tile =
+viewDropZone : Config -> Tile -> Html Msg
+viewDropZone config tile =
     let
         { x, y } =
-            tileToPosition tile
+            tileToPosition config.tileSize tile
 
         background body =
             div
                 [ style
-                    [ ( "width", px viewConfig.tileSize )
-                    , ( "height", px viewConfig.tileSize )
+                    [ ( "width", px config.tileSize )
+                    , ( "height", px config.tileSize )
                     , ( "outline", "3px solid red" )
                     , ( "left", px x )
                     , ( "top", px y )
@@ -535,17 +557,20 @@ getAllItems { staticItems, activeItem } =
 view : Model -> Html Msg
 view model =
     let
-        { activeItem, staticItems, playState, image } =
+        { activeItem, staticItems, playState, image, size } =
             model
 
+        config =
+            viewConfig size
+
         width =
-            viewConfig.tileSize * viewConfig.columns
+            config.tileSize * config.columns
 
         height =
-            viewConfig.tileSize * viewConfig.rows
+            config.tileSize * config.rows
 
         barItem body =
-            div [ Styles.statusBarItem ] body
+            div [ class [ Styles.StatusBarItem ] ] body
 
         ( progress, header, time ) =
             case playState of
@@ -556,7 +581,7 @@ view model =
                     in
                         ( barItem [ text (toString done ++ " of " ++ toString total ++ " done.") ]
                         , barItem []
-                        , barItem [ text (formatSeconds n) ]
+                        , barItem [ text (toString n) ]
                         )
 
                 Timeout n ->
@@ -567,7 +592,13 @@ view model =
 
                 Win n ->
                     ( barItem []
-                    , barItem [ text ("Done! You took " ++ formatSeconds n) ]
+                    , barItem [ text ("Great job! You scored " ++ toString n ++ " points!") ]
+                    , barItem []
+                    )
+
+                Lose ->
+                    ( barItem []
+                    , barItem [ text "Time is up. Try again!" ]
                     , barItem []
                     )
 
@@ -575,47 +606,158 @@ view model =
             PickImage (Result.withDefault 0 (String.toInt value))
 
         container body =
-            div [ Styles.container ] [ body ]
+            div [ id Styles.Container ] [ body ]
 
         wrapper body =
-            div [ Styles.wrapper (toFloat width) ] body
-    in
-        container <|
-            wrapper <|
-                [ div [ Styles.statusBar ]
-                    [ progress
-                    , header
-                    , time
-                    ]
-                , div
-                    [ Styles.puzzleWrapper ( toFloat width, toFloat height )
-                    ]
-                    (List.concat
-                        [ viewActiveItem image activeItem
-                        , List.map
-                            (\( item, tile ) ->
-                                let
-                                    itemAndPos =
-                                        ( item, (tileToPosition tile) )
-                                in
-                                    case playState of
-                                        Playing _ ->
-                                            viewDragableItem image False itemAndPos
-
-                                        _ ->
-                                            viewNonDragableItem image itemAndPos
-                            )
-                            staticItems
-                        ]
-                    )
-                , case playState of
-                    Win _ ->
-                        button
-                            [ Styles.playAgainButton
-                            , onClick PlayAgain
-                            ]
-                            [ text "Play Again" ]
-
-                    _ ->
-                        text ""
+            div
+                [ id Styles.Wrapper
+                , style (Styles.wrapper width)
                 ]
+                body
+
+        timeBar =
+            let
+                ( time, limit ) =
+                    case model.playState of
+                        Playing n ->
+                            ( n, model.timeLimit )
+
+                        Win n ->
+                            ( n, model.timeLimit )
+
+                        Lose ->
+                            ( 0, 1 )
+
+                        Timeout n ->
+                            ( n, 3 )
+
+                timeBarWidth =
+                    round (toFloat time / toFloat limit * toFloat width)
+            in
+                div
+                    [ style
+                        [ ( "width", px width )
+                        , ( "height", "2px" )
+                        , ( "margin-bottom", "5px" )
+                        ]
+                    ]
+                    [ div
+                        [ style
+                            [ ( "width", px timeBarWidth )
+                            , ( "height", "2px" )
+                            , ( "transition", "all .2s" )
+                            , ( "background-color", "#ff5522" )
+                            ]
+                        ]
+                        []
+                    ]
+
+        progressBar =
+            let
+                ( done, total ) =
+                    getProgress (getAllItems model)
+
+                progressBarWidth =
+                    round (toFloat done / toFloat total * toFloat width)
+            in
+                div
+                    [ style
+                        [ ( "width", px width )
+                        , ( "height", "2px" )
+                        , ( "margin-bottom", "5px" )
+                        ]
+                    ]
+                    [ div
+                        [ style
+                            [ ( "width", px progressBarWidth )
+                            , ( "height", "2px" )
+                            , ( "transition", "all .2s" )
+                            , ( "background-color", "#aaff00" )
+                            ]
+                        ]
+                        []
+                    ]
+
+        puzzle =
+            List.concat
+                [ viewActiveItem config image activeItem
+                , List.map
+                    (\( item, tile ) ->
+                        let
+                            itemAndPos =
+                                ( item, (tileToPosition config.tileSize tile) )
+                        in
+                            case playState of
+                                Playing _ ->
+                                    viewDragableItem config image False itemAndPos
+
+                                _ ->
+                                    viewNonDragableItem config image itemAndPos
+                    )
+                    staticItems
+                ]
+    in
+        div []
+            [ Styles.styles
+            , container <|
+                wrapper <|
+                    [ div [ id Styles.StatusBar ]
+                        [ progress
+                        , header
+                        , time
+                        ]
+                    , progressBar
+                    , timeBar
+                    , div
+                        [ id Styles.PuzzleWrapper
+                        , style (Styles.puzzle ( width, height ))
+                        ]
+                        (let
+                            ( opacity, scale ) =
+                                case model.playState of
+                                    Win _ ->
+                                        ( 1, 1 )
+
+                                    _ ->
+                                        ( 0, 0 )
+                         in
+                            div
+                                [ style
+                                    [ ( "position", "absolute" )
+                                    , ( "z-index", "99" )
+                                    , ( "top", "50%" )
+                                    , ( "left", "50%" )
+                                    , ( "font-size", "100px" )
+                                    , ( "width", "150px" )
+                                    , ( "height", "150px" )
+                                    , ( "background", "rgba(255, 255, 255, .9)" )
+                                    , ( "display", "flex" )
+                                    , ( "align-items", "center" )
+                                    , ( "justify-content", "center" )
+                                    , ( "border-radius", "50%" )
+                                    , ( "transform", "translate(-50%, -50%) scale(" ++ toString scale ++ ")" )
+                                    , ( "opacity", toString opacity )
+                                    , ( "pointer-events", "none" )
+                                    , ( "transition", "all .2s" )
+                                    ]
+                                ]
+                                [ text "👍" ]
+                                :: puzzle
+                        )
+                    , case playState of
+                        Win _ ->
+                            bigButton "Play Another" PlayRandom
+
+                        Lose ->
+                            div []
+                                [ bigButton "Play Another" PlayRandom
+                                , bigButton "Play Again" PlayAgain
+                                ]
+
+                        Timeout _ ->
+                            text ""
+
+                        Playing _ ->
+                            text ""
+                    ]
+            ]
