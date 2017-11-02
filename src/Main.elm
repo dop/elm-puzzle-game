@@ -1,11 +1,10 @@
 module Main exposing (..)
 
+import Css exposing (..)
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (on, onClick, targetValue)
-import Styles
 import Puzzle
-import Elements exposing (..)
 import Button
 import Menu exposing (Msg, node, leaf)
 import Debug
@@ -26,6 +25,7 @@ type MenuCommand
     | ShowCredits
     | SoundOn
     | SoundOff
+    | Scoreboard
 
 
 type Msg
@@ -80,6 +80,7 @@ defaultModel =
                 , leaf "Medium" (Play levelMedium)
                 , leaf "Hard" (Play levelHard)
                 ]
+            , leaf "Scoreboard" Scoreboard
             , Menu.node "Settings"
                 [ Menu.node "Sound"
                     [ leaf "On" SoundOn
@@ -155,6 +156,34 @@ updateByMenu menu model =
 
         SoundOff ->
             ( model, Cmd.none )
+
+        Scoreboard ->
+            ( model, Cmd.none )
+
+
+container : Int -> Html a -> Html a
+container width html =
+    let
+        containerStyle =
+            [ position absolute
+            , left zero
+            , top zero
+            , right zero
+            , bottom zero
+            , backgroundColor (hex "202020")
+            , textAlign center
+            , color (hex "FFFFFF")
+            ]
+
+        wrapperStyle =
+            [ margin2 zero auto
+            , Css.width (px (toFloat width))
+            ]
+    in
+        div [ style (asPairs containerStyle) ]
+            [ div [ style (asPairs wrapperStyle) ]
+                [ html ]
+            ]
 
 
 view : Model -> Html Msg
