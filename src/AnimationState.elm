@@ -12,6 +12,10 @@ type AnimationState
     | Done
 
 
+type alias AnimationData a =
+    { a | time : Time, animation : AnimationState }
+
+
 progress : AnimationState -> Time -> AnimationState
 progress state t =
     case state of
