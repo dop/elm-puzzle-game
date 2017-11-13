@@ -3,11 +3,8 @@ module Main exposing (..)
 import Css exposing (..)
 import Html exposing (..)
 import Html.Attributes exposing (..)
-import Html.Events exposing (on, onClick, targetValue)
 import Puzzle
-import Button
 import Menu exposing (Msg, node, leaf)
-import Debug
 
 
 main : Program Never Model Msg
@@ -23,8 +20,6 @@ main =
 type MenuCommand
     = Play Level
     | ShowCredits
-    | SoundOn
-    | SoundOff
     | Scoreboard
 
 
@@ -81,12 +76,6 @@ defaultModel =
                 , leaf "Hard" (Play levelHard)
                 ]
             , leaf "Scoreboard" Scoreboard
-            , Menu.node "Settings"
-                [ Menu.node "Sound"
-                    [ leaf "On" SoundOn
-                    , leaf "Off" SoundOff
-                    ]
-                ]
             , leaf "Credits" ShowCredits
             ]
         )
@@ -120,7 +109,11 @@ update msg model =
                 Nothing ->
                     case model of
                         Menu model ->
-                            ( Menu (Menu.update msg model), Cmd.none )
+                            let
+                                ( menuModel, menuCmd ) =
+                                    Menu.update msg model
+                            in
+                                ( Menu menuModel, Cmd.map MenuMsg menuCmd )
 
                         _ ->
                             ( model, Cmd.none )
@@ -149,12 +142,6 @@ updateByMenu menu model =
                 ( Puzzle puzzle, Cmd.map PuzzleMsg cmds )
 
         ShowCredits ->
-            ( model, Cmd.none )
-
-        SoundOn ->
-            ( model, Cmd.none )
-
-        SoundOff ->
             ( model, Cmd.none )
 
         Scoreboard ->

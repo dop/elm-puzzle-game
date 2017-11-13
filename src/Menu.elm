@@ -21,6 +21,7 @@ import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
 import Button
+import Task
 
 
 type alias TransitionData a =
@@ -39,7 +40,7 @@ type View a
     = Single (Screen a)
     | Transition (TransitionData a)
     | FadeIn (FadeInData a)
-    | FadeOut (FadeOutData a)
+    | FadeOut (FadeOutData a) (Msg a)
     | None
 
 
@@ -53,6 +54,7 @@ type Msg a
     = Push (Screen a)
     | Pop
     | Emit a
+    | Exit a
     | ButtonMsg Int (Button.Msg (Msg a))
     | Frame Time
 
@@ -117,7 +119,7 @@ node title items =
 
 leaf : String -> a -> Node a
 leaf title msg =
-    Button.init (Emit msg) title
+    Button.init (Exit msg) title
 
 
 map : (( Int, Node a ) -> Node a) -> Model a -> Model a
@@ -134,8 +136,8 @@ map f model =
                 FadeIn fade ->
                     FadeIn { fade | to = enum (List.map f fade.to) }
 
-                FadeOut fade ->
-                    FadeOut fade
+                FadeOut fade msg ->
+                    FadeOut fade msg
 
                 None ->
                     None
@@ -158,16 +160,26 @@ transition from to =
         }
 
 
-update : Msg a -> Model a -> Model a
+pure : Model a -> ( Model a, Cmd (Msg a) )
+pure model =
+    ( model, Cmd.none )
+
+
+send : Msg a -> Cmd (Msg a)
+send msg =
+    Task.succeed msg |> Task.perform identity
+
+
+update : Msg a -> Model a -> ( Model a, Cmd (Msg a) )
 update msg model =
     case msg of
         Frame diff ->
             case model.current of
                 Single _ ->
-                    model
+                    pure model
 
                 None ->
-                    model
+                    pure model
 
                 FadeIn fade ->
                     let
@@ -188,11 +200,11 @@ update msg model =
                                 }
                     in
                         if isDone nextAnimation then
-                            { model | current = Single to }
+                            pure { model | current = Single to }
                         else
-                            { model | current = nextFade }
+                            pure { model | current = nextFade }
 
-                FadeOut fade ->
+                FadeOut fade msg ->
                     let
                         { from, animation, time } =
                             fade
@@ -209,11 +221,12 @@ update msg model =
                                     | animation = nextAnimation
                                     , time = nextTime
                                 }
+                                msg
                     in
                         if isDone nextAnimation then
-                            { model | current = None }
+                            ( { model | current = None }, send msg )
                         else
-                            { model | current = nextFade }
+                            pure { model | current = nextFade }
 
                 Transition transition ->
                     let
@@ -234,34 +247,36 @@ update msg model =
                                 }
                     in
                         if isDone nextAnimation then
-                            { model | current = Single to }
+                            pure { model | current = Single to }
                         else
-                            { model | current = nextTransition }
+                            pure { model | current = nextTransition }
 
         Push screen ->
-            case model.current of
-                Single current ->
-                    { model
-                        | stack = current :: model.stack
-                        , current = transition current screen
-                    }
+            pure
+                (case model.current of
+                    Single current ->
+                        { model
+                            | stack = current :: model.stack
+                            , current = transition current screen
+                        }
 
-                FadeIn _ ->
-                    model
+                    FadeIn _ ->
+                        model
 
-                FadeOut _ ->
-                    model
+                    FadeOut _ _ ->
+                        model
 
-                Transition _ ->
-                    model
+                    Transition _ ->
+                        model
 
-                None ->
-                    model
+                    None ->
+                        model
+                )
 
         Pop ->
             case model.stack of
                 [] ->
-                    model
+                    pure model
 
                 last :: rest ->
                     let
@@ -282,19 +297,43 @@ update msg model =
                                 FadeIn { to } ->
                                     transitionTo to
 
-                                FadeOut _ ->
+                                FadeOut _ _ ->
                                     model.current
 
                                 None ->
                                     model.current
                     in
+                        pure
+                            { model
+                                | stack = rest
+                                , current = current
+                            }
+
+        Exit msg ->
+            pure
+                (case model.current of
+                    Single screen ->
                         { model
-                            | stack = rest
-                            , current = current
+                            | current =
+                                FadeOut
+                                    { from = screen
+                                    , time = 0
+                                    , animation =
+                                        Playing
+                                            (Animation.animation 0
+                                                |> Animation.ease Ease.inOutQuad
+                                                |> Animation.duration (0.4 * Time.second)
+                                            )
+                                    }
+                                    (Emit msg)
                         }
 
+                    _ ->
+                        model
+                )
+
         Emit _ ->
-            model
+            pure model
 
         ButtonMsg id msg ->
             case model.current of
@@ -304,26 +343,28 @@ update msg model =
                             update msg model
 
                         Nothing ->
-                            map
-                                (\( i, node ) ->
-                                    if id == i then
-                                        Button.update msg node
-                                    else
-                                        node
+                            pure
+                                (map
+                                    (\( i, node ) ->
+                                        if id == i then
+                                            Button.update msg node
+                                        else
+                                            node
+                                    )
+                                    model
                                 )
-                                model
 
                 Transition _ ->
-                    model
+                    pure model
 
                 FadeIn _ ->
-                    model
+                    pure model
 
-                FadeOut _ ->
-                    model
+                FadeOut _ _ ->
+                    pure model
 
                 None ->
-                    model
+                    pure model
 
 
 subscriptions : Model a -> Sub (Msg a)
@@ -342,7 +383,7 @@ subscriptions model =
             FadeIn _ ->
                 frames
 
-            FadeOut _ ->
+            FadeOut _ _ ->
                 frames
 
             None ->
@@ -475,7 +516,7 @@ viewView view =
         FadeIn fade ->
             viewFadeIn fade
 
-        FadeOut fade ->
+        FadeOut fade _ ->
             viewFadeOut fade
 
         None ->
