@@ -11,37 +11,13 @@ module Menu
         , getParentMsg
         )
 
-import AnimationState exposing (..)
-import Animation exposing (Animation)
-import AnimationFrame
-import Ease
-import Time exposing (Time)
 import Css exposing (..)
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
 import Button
 import Task
-
-
-type alias TransitionData a =
-    AnimationData { from : Screen a, to : Screen a }
-
-
-type alias FadeInData a =
-    AnimationData { to : Screen a }
-
-
-type alias FadeOutData a =
-    AnimationData { from : Screen a }
-
-
-type View a
-    = Single (Screen a)
-    | Transition (TransitionData a)
-    | FadeIn (FadeInData a)
-    | FadeOut (FadeOutData a) (Msg a)
-    | None
+import Transition exposing (TransitionData)
 
 
 type alias Model a =
@@ -50,17 +26,37 @@ type alias Model a =
     }
 
 
+type View a
+    = Single (Screen a)
+    | Transition
+        { screens : { from : Screen a, to : Screen a }
+        , transition : Transition.Model (Msg a)
+        }
+    | None
+
+
 type Msg a
     = Push (Screen a)
     | Pop
     | Emit a
     | Exit a
     | ButtonMsg Int (Button.Msg (Msg a))
-    | Frame Time
+    | TransitionMsg Transition.Msg
 
 
-type alias Screen a =
-    List ( Int, Node a )
+type Screen a
+    = Menu (List ( Int, Node a ))
+    | Embed (Html (Msg a))
+
+
+screenMap : (( Int, Node a ) -> ( Int, Node a )) -> Screen a -> Screen a
+screenMap f screen =
+    case screen of
+        Embed html ->
+            Embed html
+
+        Menu nodes ->
+            Menu (List.map f nodes)
 
 
 type alias Node a =
@@ -84,18 +80,43 @@ getParentMsg msg =
 init : List (Node a) -> Model a
 init tree =
     { stack = []
-    , current =
-        FadeIn
-            { to = enum tree
-            , time = 0
-            , animation =
-                Playing
-                    (Animation.animation 0
-                        |> Animation.ease Ease.inOutQuad
-                        |> Animation.duration (0.4 * Time.second)
-                    )
-            }
+    , current = fadeIn (Menu (enum tree))
     }
+
+
+emptyScreen : Screen a
+emptyScreen =
+    Menu []
+
+
+fadeIn : Screen a -> View a
+fadeIn screen =
+    let
+        from _ =
+            div [] []
+
+        to t =
+            viewAnimatedScreen t screen
+    in
+        Transition
+            { screens = { to = screen, from = emptyScreen }
+            , transition = Transition.transition from to
+            }
+
+
+fadeOut : Screen a -> Msg a -> View a
+fadeOut screen msg =
+    let
+        to _ =
+            div [] []
+
+        from t =
+            viewAnimatedScreen t screen
+    in
+        Transition
+            { screens = { to = emptyScreen, from = screen }
+            , transition = Transition.transition from to
+            }
 
 
 enum : List a -> List ( Int, a )
@@ -114,7 +135,7 @@ enum list =
 
 node : String -> List (Node a) -> Node a
 node title items =
-    Button.init (Push (enum items)) title
+    Button.init (Push (Menu (enum items))) title
 
 
 leaf : String -> a -> Node a
@@ -122,42 +143,9 @@ leaf title msg =
     Button.init (Exit msg) title
 
 
-map : (( Int, Node a ) -> Node a) -> Model a -> Model a
-map f model =
-    let
-        current =
-            case model.current of
-                Single screen ->
-                    Single (enum (List.map f screen))
-
-                Transition transition ->
-                    Transition { transition | to = enum (List.map f transition.to) }
-
-                FadeIn fade ->
-                    FadeIn { fade | to = enum (List.map f fade.to) }
-
-                FadeOut fade msg ->
-                    FadeOut fade msg
-
-                None ->
-                    None
-    in
-        { model | current = current }
-
-
-transition : Screen a -> Screen a -> View a
-transition from to =
-    Transition
-        { from = from
-        , to = to
-        , time = 0
-        , animation =
-            Playing
-                (Animation.animation 0
-                    |> Animation.ease Ease.inOutQuad
-                    |> Animation.duration (0.4 * Time.second)
-                )
-        }
+embed : String -> Html a -> Node a
+embed title content =
+    Button.init (Push (Embed (Html.map Emit content))) title
 
 
 pure : Model a -> ( Model a, Cmd (Msg a) )
@@ -173,98 +161,50 @@ send msg =
 update : Msg a -> Model a -> ( Model a, Cmd (Msg a) )
 update msg model =
     case msg of
-        Frame diff ->
+        TransitionMsg msg ->
             case model.current of
+                Transition { screens, transition } ->
+                    let
+                        nextTransition =
+                            Transition.update msg transition
+                    in
+                        if Transition.isDone nextTransition then
+                            pure { model | current = Single screens.to }
+                        else
+                            pure
+                                { model
+                                    | current =
+                                        Transition
+                                            { screens = screens
+                                            , transition = nextTransition
+                                            }
+                                }
+
                 Single _ ->
                     pure model
 
                 None ->
                     pure model
 
-                FadeIn fade ->
-                    let
-                        { to, animation, time } =
-                            fade
-
-                        nextTime =
-                            time + diff
-
-                        nextAnimation =
-                            AnimationState.progress animation nextTime
-
-                        nextFade =
-                            FadeIn
-                                { fade
-                                    | animation = nextAnimation
-                                    , time = nextTime
-                                }
-                    in
-                        if isDone nextAnimation then
-                            pure { model | current = Single to }
-                        else
-                            pure { model | current = nextFade }
-
-                FadeOut fade msg ->
-                    let
-                        { from, animation, time } =
-                            fade
-
-                        nextTime =
-                            time + diff
-
-                        nextAnimation =
-                            AnimationState.progress animation nextTime
-
-                        nextFade =
-                            FadeOut
-                                { fade
-                                    | animation = nextAnimation
-                                    , time = nextTime
-                                }
-                                msg
-                    in
-                        if isDone nextAnimation then
-                            ( { model | current = None }, send msg )
-                        else
-                            pure { model | current = nextFade }
-
-                Transition transition ->
-                    let
-                        { from, to, animation, time } =
-                            transition
-
-                        nextTime =
-                            time + diff
-
-                        nextAnimation =
-                            AnimationState.progress animation nextTime
-
-                        nextTransition =
-                            Transition
-                                { transition
-                                    | time = nextTime
-                                    , animation = nextAnimation
-                                }
-                    in
-                        if isDone nextAnimation then
-                            pure { model | current = Single to }
-                        else
-                            pure { model | current = nextTransition }
-
-        Push screen ->
+        Push next ->
             pure
                 (case model.current of
                     Single current ->
-                        { model
-                            | stack = current :: model.stack
-                            , current = transition current screen
-                        }
+                        let
+                            from t =
+                                viewAnimatedScreen t current
 
-                    FadeIn _ ->
-                        model
-
-                    FadeOut _ _ ->
-                        model
+                            to t =
+                                viewAnimatedScreen t next
+                        in
+                            { model
+                                | stack = current :: model.stack
+                                , current =
+                                    Transition
+                                        { screens = { from = current, to = next }
+                                        , transition = Transition.transition from to
+                                        }
+                            }
 
                     Transition _ ->
                         model
@@ -280,24 +220,25 @@ update msg model =
 
                 last :: rest ->
                     let
-                        resetScreen =
-                            List.map (\( i, node ) -> ( i, Button.reset node )) last
-
-                        transitionTo from =
-                            transition from resetScreen
+                        previous =
+                            screenMap (\( i, node ) -> ( i, Button.reset node )) last
 
                         current =
                             case model.current of
-                                Single screen ->
-                                    transitionTo screen
+                                Single current ->
+                                    let
+                                        from t =
+                                            viewAnimatedScreen t current
 
-                                Transition { from, to } ->
-                                    transitionTo to
+                                        to t =
+                                            viewAnimatedScreen t previous
+                                    in
+                                        Transition
+                                            { screens = { from = current, to = previous }
+                                            , transition = Transition.transition from to
+                                            }
 
-                                FadeIn { to } ->
-                                    transitionTo to
-
-                                FadeOut _ _ ->
+                                Transition _ ->
                                     model.current
 
                                 None ->
@@ -315,17 +256,7 @@ update msg model =
                     Single screen ->
                         { model
                             | current =
-                                FadeOut
-                                    { from = screen
-                                    , time = 0
-                                    , animation =
-                                        Playing
-                                            (Animation.animation 0
-                                                |> Animation.ease Ease.inOutQuad
-                                                |> Animation.duration (0.4 * Time.second)
-                                            )
-                                    }
-                                    (Emit msg)
+                                fadeOut screen (Emit msg)
                         }
 
                     _ ->
@@ -337,30 +268,28 @@ update msg model =
 
         ButtonMsg id msg ->
             case model.current of
-                Single _ ->
+                Single screen ->
                     case Button.getParentMsg msg of
                         Just msg ->
                             update msg model
 
                         Nothing ->
-                            pure
-                                (map
-                                    (\( i, node ) ->
-                                        if id == i then
-                                            Button.update msg node
-                                        else
-                                            node
+                            let
+                                f ( i, node ) =
+                                    ( i
+                                    , if id == i then
+                                        Button.update msg node
+                                      else
+                                        node
                                     )
-                                    model
-                                )
+                            in
+                                pure
+                                    ({ model
+                                        | current = Single (screenMap f screen)
+                                     }
+                                    )
 
                 Transition _ ->
-                    pure model
-
-                FadeIn _ ->
-                    pure model
-
-                FadeOut _ _ ->
                     pure model
 
                 None ->
@@ -369,178 +298,15 @@ update msg model =
 
 subscriptions : Model a -> Sub (Msg a)
 subscriptions model =
-    let
-        frames =
-            AnimationFrame.diffs Frame
-    in
-        case model.current of
-            Single _ ->
-                Sub.none
+    case model.current of
+        Transition { transition } ->
+            Sub.map TransitionMsg (Transition.subscriptions transition)
 
-            Transition _ ->
-                frames
-
-            FadeIn _ ->
-                frames
-
-            FadeOut _ _ ->
-                frames
-
-            None ->
-                Sub.none
-
-
-viewButton : ( Int, Node a ) -> Html (Msg a)
-viewButton ( i, node ) =
-    let
-        style =
-            { defaultColor = hex "32cd32"
-            , activeColor = hex "ee9a00"
-            , disabledColor = hex "696969"
-            }
-    in
-        div [] [ Html.map (ButtonMsg i) (Button.view style node) ]
-
-
-viewAnimatedScreen : Float -> List (Html (Msg a)) -> Html (Msg a)
-viewAnimatedScreen t screen =
-    let
-        styles =
-            [ transform (scale (3 - (t * 2)))
-            , opacity (num (t ^ 2))
-            , position absolute
-            , top zero
-            , Css.width (pct 100)
-            ]
-    in
-        viewScreenWithCss styles screen
-
-
-viewScreen : List (Html (Msg a)) -> Html (Msg a)
-viewScreen screen =
-    viewScreenWithCss [] screen
-
-
-viewScreenWithCss : List Css.Style -> List (Html (Msg a)) -> Html (Msg a)
-viewScreenWithCss styles screen =
-    let
-        viewItem item =
-            div [ style (asPairs [ marginBottom (Css.em 1) ]) ]
-                [ item ]
-    in
-        div [ style (asPairs styles) ] (List.map viewItem screen)
-
-
-viewTransition : TransitionData a -> Html (Msg a)
-viewTransition { from, to, time, animation } =
-    let
-        fromScreen =
-            List.map viewButton from
-
-        toScreen =
-            List.map viewButton to
-    in
-        case animation of
-            Pending ->
-                viewScreen fromScreen
-
-            Done ->
-                viewScreen toScreen
-
-            Playing animation ->
-                let
-                    t =
-                        Animation.animate time animation
-                in
-                    div [ style (asPairs [ position relative ]) ]
-                        [ viewAnimatedScreen (1 - t) fromScreen
-                        , viewAnimatedScreen t toScreen
-                        ]
-
-
-viewFadeIn : FadeInData a -> Html (Msg a)
-viewFadeIn { to, time, animation } =
-    let
-        toScreen =
-            List.map viewButton to
-    in
-        case animation of
-            Pending ->
-                div [] []
-
-            Done ->
-                viewScreen toScreen
-
-            Playing animation ->
-                let
-                    t =
-                        Animation.animate time animation
-                in
-                    div [ style (asPairs [ position relative ]) ]
-                        [ viewAnimatedScreen t toScreen
-                        ]
-
-
-viewFadeOut : FadeOutData a -> Html (Msg a)
-viewFadeOut { from, time, animation } =
-    let
-        fromScreen =
-            List.map viewButton from
-    in
-        case animation of
-            Pending ->
-                div [] []
-
-            Done ->
-                viewScreen fromScreen
-
-            Playing animation ->
-                let
-                    t =
-                        Animation.animate time animation
-                in
-                    div [ style (asPairs [ position relative ]) ]
-                        [ viewAnimatedScreen (1 - t) fromScreen
-                        ]
-
-
-viewView : View a -> Html (Msg a)
-viewView view =
-    case view of
-        Single screen ->
-            viewScreen (List.map viewButton screen)
-
-        Transition transition ->
-            viewTransition transition
-
-        FadeIn fade ->
-            viewFadeIn fade
-
-        FadeOut fade _ ->
-            viewFadeOut fade
+        Single _ ->
+            Sub.none
 
         None ->
-            div [] []
-
-
-viewBackButton : Html (Msg a)
-viewBackButton =
-    let
-        styles =
-            [ fontFamilies [ qt "Press Start 2P" ]
-            , textTransform uppercase
-            , textShadow4 (px 0) (px 1) (px 2) (rgb 0 0 0)
-            , color (hex "FFFFFF")
-            , backgroundColor transparent
-            , border zero
-            , cursor pointer
-            ]
-    in
-        button
-            [ style (asPairs styles)
-            , onClick Pop
-            ]
-            [ Html.text "< back" ]
+            Sub.none
 
 
 view : Model a -> Html (Msg a)
@@ -561,3 +327,91 @@ view { stack, current } =
             [ div [ style (asPairs [ minHeight (Css.em 2) ]) ] back
             , main
             ]
+
+
+viewView : View a -> Html (Msg a)
+viewView view =
+    let
+        wrap =
+            div [ style (asPairs [ position relative ]) ]
+    in
+        case view of
+            Single screen ->
+                wrap [ viewStaticScreen screen ]
+
+            Transition { transition } ->
+                Transition.view wrap transition
+
+            None ->
+                div [] []
+
+
+viewStaticScreen : Screen a -> Html (Msg a)
+viewStaticScreen screen =
+    viewAnimatedScreen 1 screen
+
+
+viewAnimatedScreen : Float -> Screen a -> Html (Msg a)
+viewAnimatedScreen t screen =
+    let
+        styles =
+            [ transform (scale (3 - (t * 2)))
+            , opacity (num (t ^ 2))
+            , position absolute
+            , top zero
+            , Css.width (pct 100)
+            ]
+    in
+        viewScreenWithCss styles screen
+
+
+viewScreenWithCss : List Css.Style -> Screen a -> Html (Msg a)
+viewScreenWithCss styles screen =
+    div [ style (asPairs styles) ] (viewScreen screen)
+
+
+viewScreen : Screen a -> List (Html (Msg a))
+viewScreen screen =
+    case screen of
+        Menu nodes ->
+            let
+                viewItem item =
+                    div [ style (asPairs [ marginBottom (Css.em 1) ]) ]
+                        [ viewButton item ]
+            in
+                List.map viewItem nodes
+
+        Embed html ->
+            [ html ]
+
+
+viewButton : ( Int, Node a ) -> Html (Msg a)
+viewButton ( i, node ) =
+    let
+        style =
+            { defaultColor = hex "32cd32"
+            , activeColor = hex "ee9a00"
+            , disabledColor = hex "696969"
+            }
+    in
+        div [] [ Html.map (ButtonMsg i) (Button.view style node) ]
+
+
+viewBackButton : Html (Msg a)
+viewBackButton =
+    let
+        styles =
+            [ fontFamilies [ qt "Press Start 2P" ]
+            , textTransform uppercase
+            , textShadow4 (px 0) (px 1) (px 2) (rgb 0 0 0)
+            , color (hex "FFFFFF")
+            , backgroundColor transparent
+            , border zero
+            , cursor pointer
+            ]
+    in
+        button
+            [ style (asPairs styles)
+            , onClick Pop
+            ]
+            [ Html.text "< back" ]
