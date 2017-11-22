@@ -8,6 +8,7 @@ module Menu
         , Msg
         , node
         , leaf
+        , embed
         , getParentMsg
         )
 
@@ -31,8 +32,8 @@ type View a
     | Transition
         { screens : { from : Screen a, to : Screen a }
         , transition : Transition.Model (Msg a)
+        , msg : Maybe (Msg a)
         }
-    | None
 
 
 type Msg a
@@ -101,6 +102,7 @@ fadeIn screen =
         Transition
             { screens = { to = screen, from = emptyScreen }
             , transition = Transition.transition from to
+            , msg = Nothing
             }
 
 
@@ -116,6 +118,7 @@ fadeOut screen msg =
         Transition
             { screens = { to = emptyScreen, from = screen }
             , transition = Transition.transition from to
+            , msg = Just msg
             }
 
 
@@ -161,15 +164,24 @@ send msg =
 update : Msg a -> Model a -> ( Model a, Cmd (Msg a) )
 update msg model =
     case msg of
-        TransitionMsg msg ->
+        TransitionMsg transitionMsg ->
             case model.current of
-                Transition { screens, transition } ->
+                Transition { screens, transition, msg } ->
                     let
                         nextTransition =
-                            Transition.update msg transition
+                            Transition.update transitionMsg transition
                     in
                         if Transition.isDone nextTransition then
-                            pure { model | current = Single screens.to }
+                            let
+                                nextModel =
+                                    { model | current = Single screens.to }
+                            in
+                                case msg of
+                                    Just msg ->
+                                        ( nextModel, send msg )
+
+                                    Nothing ->
+                                        pure nextModel
                         else
                             pure
                                 { model
@@ -177,13 +189,11 @@ update msg model =
                                         Transition
                                             { screens = screens
                                             , transition = nextTransition
+                                            , msg = msg
                                             }
                                 }
 
                 Single _ ->
-                    pure model
-
-                None ->
                     pure model
 
         Push next ->
@@ -203,13 +213,11 @@ update msg model =
                                     Transition
                                         { screens = { from = current, to = next }
                                         , transition = Transition.transition from to
+                                        , msg = Nothing
                                         }
                             }
 
                     Transition _ ->
-                        model
-
-                    None ->
                         model
                 )
 
@@ -236,12 +244,10 @@ update msg model =
                                         Transition
                                             { screens = { from = current, to = previous }
                                             , transition = Transition.transition from to
+                                            , msg = Nothing
                                             }
 
                                 Transition _ ->
-                                    model.current
-
-                                None ->
                                     model.current
                     in
                         pure
@@ -292,9 +298,6 @@ update msg model =
                 Transition _ ->
                     pure model
 
-                None ->
-                    pure model
-
 
 subscriptions : Model a -> Sub (Msg a)
 subscriptions model =
@@ -303,9 +306,6 @@ subscriptions model =
             Sub.map TransitionMsg (Transition.subscriptions transition)
 
         Single _ ->
-            Sub.none
-
-        None ->
             Sub.none
 
 
@@ -341,9 +341,6 @@ viewView view =
 
             Transition { transition } ->
                 Transition.view wrap transition
-
-            None ->
-                div [] []
 
 
 viewStaticScreen : Screen a -> Html (Msg a)

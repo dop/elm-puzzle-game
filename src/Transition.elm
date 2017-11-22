@@ -28,6 +28,16 @@ type Msg
 -- CONSTRUCTORS
 
 
+fadeIn : (Float -> Html a) -> Model a
+fadeIn to =
+    transition (\t -> div [] []) to
+
+
+fadeOut : (Float -> Html a) -> Model a
+fadeOut from =
+    transition from (\t -> div [] [])
+
+
 transition : (Float -> Html a) -> (Float -> Html a) -> Model a
 transition from to =
     Transition
