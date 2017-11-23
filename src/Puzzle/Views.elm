@@ -86,7 +86,10 @@ viewDragableItem config image isDragging itemAndPos =
             image
             isDragging
             itemAndPos
-            [ on "mousedown" (Decode.map (DragStart item.id) Mouse.position) ]
+            [ onWithOptions "mousedown"
+                { stopPropagation = True, preventDefault = True }
+                (Decode.map (DragStart item.id) Mouse.position)
+            ]
 
 
 viewActiveItem : Config -> Image -> Maybe ( Item, Tile, Drag ) -> List (Html Msg)
