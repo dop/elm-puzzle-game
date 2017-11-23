@@ -128,14 +128,23 @@ viewDropZone config tile =
             []
 
 
-viewHeader : Model -> Html Msg
-viewHeader model =
+viewFooter : Model -> Html Msg
+viewFooter model =
     let
         { playState } =
             model
 
         barItem body =
-            div [] body
+            div
+                [ style
+                    (asPairs
+                        [ fontFamilies [ qt "Press Start 2P" ]
+                        , fontWeight normal
+                        , fontSize (px 12)
+                        ]
+                    )
+                ]
+                body
 
         ( progress, header, time ) =
             case playState of
@@ -146,28 +155,36 @@ viewHeader model =
                     in
                         ( barItem [ Html.text (toString done ++ " of " ++ toString total ++ " done.") ]
                         , barItem []
-                        , barItem [ Html.text (toString n) ]
+                        , barItem [ Html.text (toString n ++ " points") ]
                         )
 
-                Timeout n ->
+                Timeout _ ->
                     ( barItem []
-                    , barItem [ Html.text ("Starting in " ++ toString n ++ "...") ]
+                    , barItem []
                     , barItem []
                     )
 
                 Win n ->
                     ( barItem []
-                    , barItem [ Html.text ("Great job! You scored " ++ toString n ++ " points!") ]
+                    , barItem []
                     , barItem []
                     )
 
                 Lose ->
                     ( barItem []
-                    , barItem [ Html.text "Time is up. Try again!" ]
+                    , barItem [ Html.text "Time is up." ]
                     , barItem []
                     )
     in
-        div []
+        div
+            [ style
+                (asPairs
+                    [ displayFlex
+                    , justifyContent spaceBetween
+                    , margin2 (Css.em 1) zero
+                    ]
+                )
+            ]
             [ progress
             , header
             , time
@@ -219,49 +236,16 @@ viewPuzzle model =
                     ]
                 )
             ]
-            (let
-                ( opacity_, scale_ ) =
-                    case model.playState of
-                        Win _ ->
-                            ( 1, 1 )
-
-                        _ ->
-                            ( 0, 0 )
-             in
-                div
-                    [ style
-                        (asPairs
-                            [ position absolute
-                            , zIndex (int 99)
-                            , top (pct 50)
-                            , left (pct 50)
-                            , fontSize (px 100)
-                            , Css.width (px 150)
-                            , Css.height (px 150)
-                            , backgroundColor (rgba 255 255 255 0.9)
-                            , displayFlex
-                            , alignItems center
-                            , justifyContent center
-                            , borderRadius (pct 50)
-                            , transforms [ translate2 (pct (-50)) (pct (-50)), scale scale_ ]
-                            , opacity (num opacity_)
-                            , Css.property "pointer-events" "none"
-                            , Css.property "transition" "all .2s"
-                            ]
-                        )
-                    ]
-                    [ Html.text "👍" ]
-                    :: puzzle
-            )
+            ((viewOverlay model) :: puzzle)
 
 
-view : Model -> Html Msg
-view model =
+viewOverlay : Model -> Html Msg
+viewOverlay model =
     let
         viewButton model =
             Button.view
-                { defaultColor = hex "ff0000"
-                , activeColor = hex "00ff00"
+                { defaultColor = hex "32cd32"
+                , activeColor = hex "ee9a00"
                 , disabledColor = hex "696969"
                 }
                 model
@@ -273,23 +257,59 @@ view model =
         viewPlayAnother () =
             viewButton model.playAnotherButton
                 |> Html.map PlayRandomButtonMsg
-    in
-        div []
-            [ viewHeader model
-            , viewPuzzle model
-            , case model.playState of
-                Win _ ->
-                    viewPlayAgain ()
 
-                Lose ->
-                    div []
-                        [ viewPlayAnother ()
-                        , viewPlayAgain ()
+        overlay =
+            div
+                [ style
+                    (asPairs
+                        [ position absolute
+                        , backgroundColor (rgba 0 0 0 0.7)
+                        , left (px 0)
+                        , right (px 0)
+                        , top (px 0)
+                        , bottom (px 0)
+                        , displayFlex
+                        , flexDirection column
+                        , justifyContent center
+                        , alignItems center
+                        , zIndex (int 1)
                         ]
+                    )
+                ]
+    in
+        case model.playState of
+            Win score ->
+                overlay
+                    [ h3 [ style (asPairs [ marginBottom (Css.em 2) ]) ]
+                        [ div
+                            [ style (asPairs [ marginBottom (Css.em 0.75) ]) ]
+                            [ Html.text "Splendid!" ]
+                        , div
+                            [ style (asPairs [ fontSize (px 32) ]) ]
+                            [ Html.text ("+" ++ toString score ++ " points") ]
+                        ]
+                    , viewPlayAnother ()
+                    ]
 
-                Timeout _ ->
-                    Html.text ""
+            Lose ->
+                overlay
+                    [ h3 [] [ Html.text "You can do it! Try again!" ]
+                    , div [ style (asPairs [ marginBottom (Css.em 1) ]) ] [ viewPlayAgain () ]
+                    , div [] [ viewPlayAnother () ]
+                    ]
 
-                Playing _ ->
-                    Html.text ""
-            ]
+            Timeout n ->
+                overlay
+                    [ h1 [ style (asPairs [ fontSize (px 100) ]) ] [ Html.text (toString n) ]
+                    ]
+
+            Playing _ ->
+                Html.text ""
+
+
+view : Model -> Html Msg
+view model =
+    div []
+        [ viewPuzzle model
+        , viewFooter model
+        ]

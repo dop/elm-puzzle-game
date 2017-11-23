@@ -54,7 +54,7 @@ init size timeLimit =
           , image = defaultImage
           , size = size
           , timeLimit = timeLimit
-          , playAgainButton = Button.init PlayAgain "Play Again"
+          , playAgainButton = Button.init PlayAgain "Try Again"
           , playAnotherButton = Button.init PlayRandom "Play Another"
           }
         , randomImageCmd
