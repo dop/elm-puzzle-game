@@ -20,12 +20,24 @@ type alias TransitionData a =
         }
 
 
+type alias Config =
+    { duration : Float
+    , ease : Ease.Easing
+    , start : Float
+    }
+
+
 type Msg
     = Frame Time
 
 
 
 -- CONSTRUCTORS
+
+
+defaults : Config
+defaults =
+    { duration = 0.4, start = 0, ease = Ease.inOutQuad }
 
 
 fadeIn : (Float -> Html a) -> Model a
@@ -38,17 +50,32 @@ fadeOut from =
     transition from (\t -> div [] [])
 
 
+fadeInWith : Config -> (Float -> Html a) -> Model a
+fadeInWith config to =
+    transitionWith config (\t -> div [] []) to
+
+
+fadeOutWith : Config -> (Float -> Html a) -> Model a
+fadeOutWith config from =
+    transitionWith config from (\t -> div [] [])
+
+
 transition : (Float -> Html a) -> (Float -> Html a) -> Model a
-transition from to =
+transition =
+    transitionWith defaults
+
+
+transitionWith : Config -> (Float -> Html a) -> (Float -> Html a) -> Model a
+transitionWith { duration, ease, start } from to =
     Transition
         { from = from
         , to = to
         , time = 0
         , animation =
             Playing
-                (Animation.animation 0
-                    |> Animation.ease Ease.inOutQuad
-                    |> Animation.duration (0.4 * Time.second)
+                (Animation.animation start
+                    |> Animation.ease ease
+                    |> Animation.duration (duration * Time.second)
                 )
         }
 
