@@ -129,9 +129,9 @@ update msg model =
                             , shuffleCmd model.staticItems
                             )
 
-                    Playing n ->
-                        if n > 1 then
-                            pure { model | playState = Playing (n - 1) }
+                    Playing points ->
+                        if points > 1 then
+                            pure { model | playState = Playing (points - 1) }
                         else
                             pure { model | playState = Lose }
 
