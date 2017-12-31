@@ -3,6 +3,7 @@ module Puzzle.Types exposing (..)
 import Mouse exposing (Position)
 import Time exposing (Time)
 import Button
+import Transition
 
 
 type Msg
@@ -16,6 +17,7 @@ type Msg
     | PickImage Int
     | PlayAgainButtonMsg (Button.Msg Msg)
     | PlayRandomButtonMsg (Button.Msg Msg)
+    | TransitionMsg Transition.Msg
 
 
 type alias Item =
@@ -49,9 +51,9 @@ type alias Model =
 
 type PlayState
     = Playing Int
-    | Timeout Int
-    | Win Int
-    | Lose
+    | Timeout { timeout : Int, transition : Transition.Model Msg }
+    | Win { score : Int, transition : Transition.Model Msg }
+    | Lose { transition : Transition.Model Msg }
 
 
 type alias Tile =

@@ -9,6 +9,7 @@ import Puzzle.Types exposing (..)
 import Puzzle.Utils exposing (..)
 import Json.Decode as Decode
 import Button
+import Transition
 
 
 viewConfig : Int -> Config
@@ -161,21 +162,9 @@ viewFooter model =
                         , barItem [ Html.text (toString n ++ " points") ]
                         )
 
-                Timeout _ ->
+                _ ->
                     ( barItem []
                     , barItem []
-                    , barItem []
-                    )
-
-                Win n ->
-                    ( barItem []
-                    , barItem []
-                    , barItem []
-                    )
-
-                Lose ->
-                    ( barItem []
-                    , barItem [ Html.text "Time is up." ]
                     , barItem []
                     )
     in
@@ -239,75 +228,184 @@ viewPuzzle model =
                     ]
                 )
             ]
-            ((viewOverlay model) :: puzzle)
+            ((viewDecorations model) :: puzzle)
 
 
-viewOverlay : Model -> Html Msg
-viewOverlay model =
-    let
-        viewButton model =
-            Button.view
-                { defaultColor = hex "32cd32"
-                , activeColor = hex "ee9a00"
-                , disabledColor = hex "696969"
-                }
-                model
-
-        viewPlayAgain () =
-            viewButton model.playAgainButton
-                |> Html.map PlayAgainButtonMsg
-
-        viewPlayAnother () =
-            viewButton model.playAnotherButton
-                |> Html.map PlayRandomButtonMsg
-
-        overlay =
-            div
-                [ style
-                    (asPairs
-                        [ position absolute
-                        , backgroundColor (rgba 0 0 0 0.7)
-                        , left (px 0)
-                        , right (px 0)
-                        , top (px 0)
-                        , bottom (px 0)
-                        , displayFlex
-                        , flexDirection column
-                        , justifyContent center
-                        , alignItems center
-                        , zIndex (int 1)
-                        ]
-                    )
+viewOverlayWithOpacity : Float -> List (Html Msg) -> Html Msg
+viewOverlayWithOpacity opacity =
+    div
+        [ style
+            (asPairs
+                [ position absolute
+                , backgroundColor (rgba 0 0 0 opacity)
+                , left (px 0)
+                , right (px 0)
+                , top (px 0)
+                , bottom (px 0)
+                , displayFlex
+                , flexDirection column
+                , justifyContent center
+                , alignItems center
+                , zIndex (int 1)
                 ]
+            )
+        ]
+
+
+viewOverlay : List (Html Msg) -> Html Msg
+viewOverlay =
+    viewOverlayWithOpacity 0.7
+
+
+viewButton model =
+    Button.view
+        { defaultColor = hex "32cd32"
+        , activeColor = hex "ee9a00"
+        , disabledColor = hex "696969"
+        }
+        model
+
+
+viewPlayAgain model =
+    viewButton model.playAgainButton
+        |> Html.map PlayAgainButtonMsg
+
+
+viewPlayAnother model =
+    viewButton model.playAnotherButton
+        |> Html.map PlayRandomButtonMsg
+
+
+viewDecorations : Model -> Html Msg
+viewDecorations model =
+    case model.playState of
+        Win { transition, score } ->
+            if Transition.isDone transition then
+                viewWin score 1 model
+            else
+                Transition.view (div []) transition
+
+        Lose { transition } ->
+            if Transition.isDone transition then
+                viewLost 1 model
+            else
+                Transition.view (div []) transition
+
+        Timeout { timeout, transition } ->
+            if Transition.isDone transition then
+                viewTimeout timeout 1
+            else
+                Transition.view (div []) transition
+
+        Playing _ ->
+            Html.text ""
+
+
+viewTimeout : Int -> Float -> Html Msg
+viewTimeout timeout t =
+    viewOverlay
+        [ h1
+            [ css
+                [ fontSize (px 100)
+                , transform (scale (1 + 3 * t))
+                , opacity (num (1 - t))
+                ]
+            ]
+            [ Html.text (toString timeout) ]
+        ]
+
+
+viewWin : Int -> Float -> Model -> Html Msg
+viewWin score t model =
+    let
+        tBackground =
+            bind t ( 0.0, 0.6 )
+
+        tTitle =
+            bind t ( 0.0, 0.8 )
+
+        tButton =
+            bind t ( 0.4, 1.0 )
     in
-        case model.playState of
-            Win score ->
-                overlay
-                    [ h3 [ style (asPairs [ marginBottom (Css.em 2) ]) ]
-                        [ div
-                            [ style (asPairs [ marginBottom (Css.em 0.75) ]) ]
-                            [ Html.text "Splendid!" ]
-                        , div
-                            [ style (asPairs [ fontSize (px 32) ]) ]
-                            [ Html.text ("+" ++ toString score ++ " points") ]
-                        ]
-                    , viewPlayAnother ()
+        viewOverlayWithOpacity (tBackground * 0.7)
+            [ h3
+                [ css
+                    [ opacity (num tTitle)
+                    , transform (scale (1 + (2 * (1 - tTitle))))
+                    , marginBottom (Css.em 2)
                     ]
-
-            Lose ->
-                overlay
-                    [ h3 [] [ Html.text "You can do it! Try again!" ]
-                    , div [ style (asPairs [ marginBottom (Css.em 1) ]) ] [ viewPlayAgain () ]
-                    , div [] [ viewPlayAnother () ]
+                ]
+                [ div
+                    [ style (asPairs [ marginBottom (Css.em 0.75) ]) ]
+                    [ Html.text "Splendid!" ]
+                , div
+                    [ style (asPairs [ fontSize (px 32) ]) ]
+                    [ Html.text ("+" ++ toString score ++ " points") ]
+                ]
+            , div
+                [ css
+                    [ opacity (num tButton)
+                    , transform (translateY (px (100 * (1 - tButton))))
                     ]
+                ]
+                [ viewPlayAnother model ]
+            ]
 
-            Timeout n ->
-                overlay
-                    [ h1 [ style (asPairs [ fontSize (px 100) ]) ] [ Html.text (toString n) ]
+
+viewLost : Float -> Model -> Html Msg
+viewLost t model =
+    let
+        tBackground =
+            bind t ( 0.0, 0.8 )
+
+        tTitle =
+            bind t ( 0.1, 0.8 )
+
+        tButton1 =
+            bind t ( 0.2, 0.9 )
+
+        tButton2 =
+            bind t ( 0.3, 1.0 )
+    in
+        viewOverlayWithOpacity (tBackground * 0.7)
+            [ h3
+                [ css
+                    [ opacity (num tTitle)
+                    , transform (translateY (px (100 * (tTitle - 1))))
                     ]
+                ]
+                [ Html.text "Time is up! Try again?" ]
+            , div
+                [ css
+                    [ opacity (num tButton1)
+                    , transform (translateY (px (100 * (tButton1 - 1))))
+                    ]
+                , style (asPairs [ marginBottom (Css.em 1) ])
+                ]
+                [ viewPlayAgain model ]
+            , div
+                [ css
+                    [ opacity (num tButton2)
+                    , transform (translateY (px (100 * (tButton2 - 1))))
+                    ]
+                ]
+                [ viewPlayAnother model ]
+            ]
 
-            Playing _ ->
-                Html.text ""
+
+bind : Float -> ( Float, Float ) -> Float
+bind t ( a, b ) =
+    if t <= a then
+        0
+    else if t >= b then
+        1
+    else
+        (t - a) / (b - a)
+
+
+css : List Style -> Attribute msg
+css styles =
+    style (asPairs styles)
 
 
 view : Model -> Html Msg

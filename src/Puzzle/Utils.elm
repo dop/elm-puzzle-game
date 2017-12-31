@@ -18,16 +18,6 @@ positionToTile tileSize { x, y } =
         (round (toFloat x / toFloat tileSize))
 
 
-toWin : PlayState -> PlayState
-toWin state =
-    case state of
-        Playing n ->
-            Win n
-
-        _ ->
-            Win 0
-
-
 itemIsDone : ( Item, Tile ) -> Bool
 itemIsDone ( { imageTile }, tile ) =
     imageTile == tile

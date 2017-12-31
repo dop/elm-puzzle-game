@@ -1,5 +1,6 @@
 module Puzzle exposing (..)
 
+import Html exposing (Html)
 import Puzzle.Types exposing (..)
 import Puzzle.Utils exposing (..)
 import Puzzle.Views exposing (..)
@@ -10,6 +11,7 @@ import List.Extra
 import Array exposing (Array)
 import Time exposing (Time)
 import Button
+import Transition
 
 
 type alias Msg =
@@ -20,6 +22,7 @@ type alias Model =
     Puzzle.Types.Model
 
 
+view : Model -> Html Msg
 view =
     Puzzle.Views.view
 
@@ -50,7 +53,7 @@ init size timeLimit =
                     )
                     tiles
           , activeItem = Nothing
-          , playState = Timeout 3
+          , playState = makeTimeout 3
           , image = defaultImage
           , size = size
           , timeLimit = timeLimit
@@ -59,6 +62,21 @@ init size timeLimit =
           }
         , randomImageCmd
         )
+
+
+makeTimeout : Int -> PlayState
+makeTimeout n =
+    let
+        def =
+            Transition.defaults
+    in
+        Timeout
+            { timeout = n
+            , transition =
+                Transition.fadeInWith
+                    { def | duration = 1.0 }
+                    (\t -> viewTimeout n t)
+            }
 
 
 randomImageCmd : Cmd Msg
@@ -111,6 +129,36 @@ update msg model =
             ( model, Cmd.none )
     in
         case msg of
+            TransitionMsg msg ->
+                let
+                    { playState } =
+                        model
+                in
+                    pure
+                        { model
+                            | playState =
+                                case playState of
+                                    Lose { transition } ->
+                                        Lose
+                                            { transition = Transition.update msg transition
+                                            }
+
+                                    Win { score, transition } ->
+                                        Win
+                                            { score = score
+                                            , transition = Transition.update msg transition
+                                            }
+
+                                    Timeout { timeout, transition } ->
+                                        Timeout
+                                            { timeout = timeout
+                                            , transition = Transition.update msg transition
+                                            }
+
+                                    _ ->
+                                        playState
+                        }
+
             PickImage n ->
                 case Array.get n images of
                     Just image ->
@@ -121,9 +169,9 @@ update msg model =
 
             Tick _ ->
                 case model.playState of
-                    Timeout timeout ->
+                    Timeout { timeout, transition } ->
                         if timeout > 1 then
-                            pure { model | playState = Timeout (timeout - 1) }
+                            pure { model | playState = makeTimeout (timeout - 1) }
                         else
                             ( { model | playState = Playing model.timeLimit }
                             , shuffleCmd model.staticItems
@@ -133,7 +181,16 @@ update msg model =
                         if points > 1 then
                             pure { model | playState = Playing (points - 1) }
                         else
-                            pure { model | playState = Lose }
+                            let
+                                def =
+                                    Transition.defaults
+
+                                transition =
+                                    Transition.fadeInWith
+                                        { def | duration = 0.5 }
+                                        (\t -> viewLost t model)
+                            in
+                                pure { model | playState = Lose { transition = transition } }
 
                     _ ->
                         pure model
@@ -165,7 +222,27 @@ update msg model =
 
                             playState =
                                 if isDone newModel.staticItems then
-                                    toWin newModel.playState
+                                    let
+                                        def =
+                                            Transition.defaults
+
+                                        transition score =
+                                            Transition.fadeInWith
+                                                { def | duration = 0.5 }
+                                                (\t -> viewWin score t newModel)
+                                    in
+                                        case newModel.playState of
+                                            Playing score ->
+                                                Win
+                                                    { score = score
+                                                    , transition = transition score
+                                                    }
+
+                                            _ ->
+                                                Win
+                                                    { score = 0
+                                                    , transition = transition 0
+                                                    }
                                 else
                                     newModel.playState
                         in
@@ -204,8 +281,14 @@ update msg model =
 playAgain : Model -> Model
 playAgain model =
     { model
-        | playState = Timeout 3
-        , staticItems = List.map (\( item, tile ) -> ( item, item.imageTile )) model.staticItems
+        | playState =
+            makeTimeout 3
+        , staticItems =
+            List.map (\( item, tile ) -> ( item, item.imageTile )) model.staticItems
+        , playAgainButton =
+            Button.reset model.playAgainButton
+        , playAnotherButton =
+            Button.reset model.playAnotherButton
     }
 
 
@@ -273,13 +356,26 @@ subscriptions model =
 
         time =
             case model.playState of
-                Timeout _ ->
-                    [ Time.every Time.second Tick ]
+                Timeout { transition } ->
+                    [ Time.every Time.second Tick
+                    , Sub.map TransitionMsg (Transition.subscriptions transition)
+                    ]
 
                 Playing _ ->
                     [ Time.every Time.second Tick ]
 
                 _ ->
                     []
+
+        transition =
+            case model.playState of
+                Lose { transition } ->
+                    [ Sub.map TransitionMsg (Transition.subscriptions transition) ]
+
+                Win { transition } ->
+                    [ Sub.map TransitionMsg (Transition.subscriptions transition) ]
+
+                _ ->
+                    []
     in
-        Sub.batch (mouse ++ time)
+        Sub.batch (mouse ++ time ++ transition)
